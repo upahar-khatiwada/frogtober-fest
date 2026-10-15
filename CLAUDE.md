@@ -64,19 +64,17 @@ Tender status state machine: `new → extracted → matched → checked → draf
 
 ## Commands
 
-_Placeholders. Fill these in as each command is created._
-
 | Purpose | Command |
 |---|---|
-| Start full stack | `docker compose up` _(TBD)_ |
-| Pull models | _(TBD: setup script)_ |
-| Backend deps | `cd api && uv sync` _(TBD)_ |
-| Backend dev server | _(TBD: `uv run fastapi dev main.py`?)_ |
-| Backend tests | _(TBD: `uv run pytest`)_ |
-| DB migrations | _(TBD)_ |
-| Seed tenders | _(TBD)_ |
-| Frontend deps | `cd web && bun install` _(TBD)_ |
-| Frontend dev server | `bun run dev` _(TBD)_ |
-| Frontend tests | _(TBD: `bun run test` / Vitest)_ |
-| E2E test | _(TBD: `bunx playwright test`)_ |
-| Regenerate API types | _(TBD: `bunx openapi-typescript ...`)_ |
+| Start full stack | `docker compose up --build` (first time / after Dockerfile changes), `docker compose up` after |
+| Pull models | `./scripts/setup.sh` (bash/Git Bash/WSL), or manually: `docker compose exec ollama ollama pull <model>` |
+| Backend deps | `cd api && uv sync` |
+| Backend dev server | `cd api && uv run fastapi dev main.py` |
+| Backend tests | `cd api && uv run pytest -q` |
+| DB migrations | _(TBD - Prompt 2)_ |
+| Seed tenders | _(TBD - Prompt 2+)_ |
+| Frontend deps | `cd web && bun install` |
+| Frontend dev server | `cd web && bun run dev` |
+| Frontend tests | `cd web && bun run test` |
+| E2E test | _(TBD - Playwright not set up yet)_ |
+| Regenerate API types | `cd web && bun run gen:api` (needs the API running locally on :8000) |
