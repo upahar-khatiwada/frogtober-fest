@@ -1,0 +1,1 @@
+"""PDF export for the proposal package (spec section 10.1, WeasyPrint or ReportLab)."""

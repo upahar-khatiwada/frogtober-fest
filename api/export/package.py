@@ -1,0 +1,1 @@
+"""Assembles the submission-ready package (proposal file + checklist, spec section 6)."""
