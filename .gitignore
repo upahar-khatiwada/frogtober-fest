@@ -1,0 +1,31 @@
+# --- JS / Bun (web/) ---
+web/node_modules/
+web/.next/
+web/out/
+web/.turbo/
+web/*.tsbuildinfo
+web/coverage/
+
+# --- Python / uv (api/) ---
+api/.venv/
+api/__pycache__/
+api/**/__pycache__/
+api/*.egg-info/
+api/.pytest_cache/
+api/.ruff_cache/
+api/.mypy_cache/
+**/__pycache__/
+*.pyc
+
+# --- env files ---
+.env
+.env.local
+web/.env.local
+api/.env
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+
+# --- Ollama model volume (if ever run locally outside Docker) ---
+ollama-data/
