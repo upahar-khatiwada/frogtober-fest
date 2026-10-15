@@ -1,0 +1,1 @@
+"""DOCX export for the proposal package (spec section 10.1, python-docx)."""
