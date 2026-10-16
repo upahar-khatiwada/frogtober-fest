@@ -178,3 +178,28 @@ These map directly onto `TenderRecord` fields: `buyer`, `buyer_address`, `scope`
 8. Official sources for the fiscal-year start, province names, district list, and NPT offset.
 9. BS↔AD conversion library choice.
 10. PPMO blacklist URL.
+11. PAN / VAT number format (not validated in `CompanyProfile` until confirmed).
+
+## 11. Schema enums (as implemented in `api/schemas/enums.py`)
+
+The Pydantic contracts encode these Nepal facts as enums. The JSON schema the LLM is constrained by uses the same values, so the Scout cannot emit anything else. Change an enum here and in code together.
+
+| Enum | Values | Basis |
+|---|---|---|
+| `ProcurementType` | `goods`, `works`, `consulting`, `non_consulting`, `unknown` | §1 (PPA §8) |
+| `ProcurementMethod` | `ncb`, `icb`, `eoi`, `rfp`, `quotation` (sealed quotation), `other` | §2.1. Direct procurement, users' committee, force account etc. map to `other`. |
+| `EvaluationMethod` | `lowest_evaluated`, `qcbs`, `qbs`, `fixed_budget` (budget ceiling), `least_cost`, `other`. The field is nullable (notice silent). | §2.3 (PPA §25, PPR Rule 74) |
+| `BuyerLevel` | `federal`, `province`, `local`, `other` | §8 |
+| `Province` | `koshi`, `madhesh`, `bagmati`, `gandaki`, `lumbini`, `karnali`, `sudurpashchim` | §8 `[VERIFY]` names. `district` stays free text until the 77-district list is loaded. |
+| `NoticeLanguage` | `en`, `ne`, `mixed` | §6, §7 (Devanagari notices) |
+| `DocType` | `company_registration`, `business_licence`, `licence_renewal`, `pan_vat`, `tax_clearance`, `tax_return`, `self_declaration`, `power_of_attorney`, `bid_security`, `audit_report`, `experience_certificate`, `jv_agreement`, `other` | §3 (PPR Rule 40(2) list + real notices). `tax_return` is the Rule 40(2)(d) alternative to tax clearance. |
+| `RequirementCategory` | `eligibility`, `financial`, `experience`, `technical`, `personnel`, `equipment`, `other` | §3 (PPR Rule 28(3) criteria) |
+| `ContractorClass` | `A`, `B`, `C`, `D` | §3. Per-class limits are **not** encoded (sources conflict, `[VERIFY]`). |
+
+**Field formats:**
+- BS fiscal years are `"YYYY/YY"` with consecutive years (`"2082/83"`), per §7. `"2082-83"` is rejected rather than normalised, so a normaliser must run before validation.
+- `deadline_bs_iso` is a **BS** date `YYYY-MM-DD` with ASCII digits, month 01–12 and day 01–32 (BS months reach 32 days). Deterministic code fills it from `deadline_bs_raw`, and the LLM's value is never trusted. It is not an AD date.
+- `deadline_ad` is an AD datetime, set only when the notice prints an AD date. BS→AD conversion stays deterministic (§7, `[VERIFY]` library).
+- Amounts are integer NPR (`estimated_cost_npr`, `bid_security.amount_npr`, `bid_doc_fee_npr`), produced by the §9 normaliser. No statutory % is ever used to fill a value (§4).
+- `jv_allowed` is nullable: `null` means the notice is silent, which is different from `false`.
+- PAN/VAT numbers are stored as free strings. No format check is enforced because the format is not in this document. `[VERIFY]`

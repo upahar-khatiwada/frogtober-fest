@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:11434"
     llm_model: str = "qwen2.5:7b-instruct"
     embed_model: str = "bge-m3"
+    # Per-call HTTP timeout (spec section 10.5). Generous: a 7B model on CPU is slow.
+    llm_timeout_s: float = 180.0
 
     # --- Database ---
     database_url: str = "postgresql://tenderly:tenderly@localhost:5432/tenderly"

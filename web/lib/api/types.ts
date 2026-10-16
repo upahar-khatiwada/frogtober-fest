@@ -228,11 +228,456 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgentRun
+         * @description A stored agent_runs row, as served by GET /runs/{id}.
+         */
+        AgentRun: {
+            /** Tender Id */
+            tender_id?: number | null;
+            stage: components["schemas"]["Stage"];
+            /** Model */
+            model: string;
+            /**
+             * Input Hash
+             * @description sha256 of the canonical request (model, messages, schema, temperature).
+             */
+            input_hash: string;
+            /**
+             * Output Json
+             * @description Validated output; null when ok is false.
+             */
+            output_json?: {
+                [key: string]: unknown;
+            } | null;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Ok */
+            ok: boolean;
+            /** Attempts */
+            attempts: number;
+            /** Error */
+            error?: string | null;
+            /**
+             * Raw Output
+             * @description Last raw model output, kept on failure for debugging.
+             */
+            raw_output?: string | null;
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** AnnualTurnover */
+        AnnualTurnover: {
+            /** Fiscal Year Bs */
+            fiscal_year_bs: string;
+            /** Amount Npr */
+            amount_npr: number;
+        };
+        /** BidSecurity */
+        BidSecurity: {
+            /**
+             * Amount Npr
+             * @description Fixed amount stated in the notice, in NPR.
+             */
+            amount_npr?: number | null;
+            /**
+             * Percent
+             * @description Percent of bid price, if stated that way.
+             */
+            percent?: number | null;
+            /**
+             * Validity Days
+             * @description Days the bid security must stay valid.
+             */
+            validity_days?: number | null;
+        };
+        /**
+         * BuyerLevel
+         * @enum {string}
+         */
+        BuyerLevel: "federal" | "province" | "local" | "other";
+        /** CompanyProfile */
+        CompanyProfile: {
+            /** Name */
+            name: string;
+            /** Sectors */
+            sectors?: string[];
+            /**
+             * Services
+             * @default
+             */
+            services: string;
+            /** Location */
+            location?: string | null;
+            province?: components["schemas"]["Province"] | null;
+            /** Districts Served */
+            districts_served?: string[];
+            /** Pan Number */
+            pan_number?: string | null;
+            /** Vat Number */
+            vat_number?: string | null;
+            /**
+             * Registration Date
+             * @description Company registration date (AD).
+             */
+            registration_date?: string | null;
+            /** Licences */
+            licences?: components["schemas"]["ContractorLicence"][];
+            /**
+             * Turnover
+             * @description One entry per BS fiscal year.
+             */
+            turnover?: components["schemas"]["AnnualTurnover"][];
+            /** Certifications */
+            certifications?: string[];
+            /** Jv Partners */
+            jv_partners?: components["schemas"]["JVPartner"][];
+        };
+        /** ComplianceItem */
+        ComplianceItem: {
+            /** Requirement */
+            requirement: string;
+            status: components["schemas"]["ComplianceStatus"];
+            severity: components["schemas"]["Severity"];
+            /**
+             * Evidence Chunk Ids
+             * @description kb_chunks.id values backing the status.
+             */
+            evidence_chunk_ids?: number[];
+            /**
+             * Evidence Quote
+             * @description Verbatim text from the cited chunk.
+             */
+            evidence_quote?: string | null;
+            /** Explanation */
+            explanation?: string | null;
+            /**
+             * Rule Id
+             * @description Id of the deterministic Nepal rule that produced this item, if any.
+             */
+            rule_id?: string | null;
+        };
+        /**
+         * ComplianceReport
+         * @description LLM findings plus rule-generated items. Stored per tender.
+         */
+        ComplianceReport: {
+            /** Items */
+            items: components["schemas"]["ComplianceItem"][];
+        };
+        /**
+         * ComplianceStatus
+         * @enum {string}
+         */
+        ComplianceStatus: "pass" | "fail" | "unclear";
+        /**
+         * ContractorClass
+         * @enum {string}
+         */
+        ContractorClass: "A" | "B" | "C" | "D";
+        /** ContractorLicence */
+        ContractorLicence: {
+            /**
+             * Licence Type
+             * @description e.g. "construction", "electrical", "municipal business".
+             */
+            licence_type: string;
+            /** @description Construction licence class, if applicable. */
+            licence_class?: components["schemas"]["ContractorClass"] | null;
+            /** Licence Number */
+            licence_number?: string | null;
+            /** Issuing Body */
+            issuing_body?: string | null;
+            /**
+             * Last Renewed Fy Bs
+             * @description Construction licences are renewed every fiscal year (NEPAL_CONTEXT.md section 3).
+             */
+            last_renewed_fy_bs?: string | null;
+        };
+        /**
+         * DocType
+         * @description Normalised eligibility/qualification document types (PPR Rule 40(2) + real notices).
+         * @enum {string}
+         */
+        DocType: "company_registration" | "business_licence" | "licence_renewal" | "pan_vat" | "tax_clearance" | "tax_return" | "self_declaration" | "power_of_attorney" | "bid_security" | "audit_report" | "experience_certificate" | "jv_agreement" | "other";
+        /**
+         * EvaluationMethod
+         * @enum {string}
+         */
+        EvaluationMethod: "lowest_evaluated" | "qcbs" | "qbs" | "fixed_budget" | "least_cost" | "other";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** JVPartner */
+        JVPartner: {
+            /** Name */
+            name: string;
+            /** Pan Number */
+            pan_number?: string | null;
+            /** Notes */
+            notes?: string | null;
+        };
+        /**
+         * MatchDecision
+         * @enum {string}
+         */
+        MatchDecision: "pursue" | "skip";
+        /** MatchResult */
+        MatchResult: {
+            /** Score */
+            score: number;
+            /** Reasons */
+            reasons: string[];
+            decision: components["schemas"]["MatchDecision"];
+            /** Threshold */
+            threshold: number;
+        };
+        /**
+         * NoticeLanguage
+         * @enum {string}
+         */
+        NoticeLanguage: "en" | "ne" | "mixed";
+        /**
+         * ProcurementMethod
+         * @enum {string}
+         */
+        ProcurementMethod: "ncb" | "icb" | "eoi" | "rfp" | "quotation" | "other";
+        /**
+         * ProcurementType
+         * @enum {string}
+         */
+        ProcurementType: "goods" | "works" | "consulting" | "non_consulting" | "unknown";
+        /**
+         * Proposal
+         * @description A stored proposal version (`proposals` table, spec section 11).
+         */
+        Proposal: {
+            /** Id */
+            id: number;
+            /** Tender Id */
+            tender_id: number;
+            /** Version */
+            version: number;
+            /** Sections */
+            sections: components["schemas"]["ProposalSection"][];
+            review?: components["schemas"]["ReviewReport"] | null;
+            /** @default draft */
+            status: components["schemas"]["ProposalStatus"];
+            /** Approved At */
+            approved_at?: string | null;
+        };
+        /** ProposalSection */
+        ProposalSection: {
+            /** Title */
+            title: string;
+            /**
+             * Body
+             * @description Section text (Markdown).
+             */
+            body: string;
+            /**
+             * Cited Chunk Ids
+             * @description kb_chunks.id values the text is grounded in.
+             */
+            cited_chunk_ids: number[];
+        };
+        /**
+         * ProposalStatus
+         * @enum {string}
+         */
+        ProposalStatus: "draft" | "reviewed" | "approved";
+        /**
+         * Province
+         * @enum {string}
+         */
+        Province: "koshi" | "madhesh" | "bagmati" | "gandaki" | "lumbini" | "karnali" | "sudurpashchim";
+        /** RequiredDoc */
+        RequiredDoc: {
+            doc_type: components["schemas"]["DocType"];
+            /**
+             * Description
+             * @description Document name as written in the notice.
+             */
+            description: string;
+            /**
+             * Fiscal Year Bs
+             * @description BS fiscal year the document must cover, e.g. "2080/81" for tax clearance.
+             */
+            fiscal_year_bs?: string | null;
+            /**
+             * Mandatory
+             * @default true
+             */
+            mandatory: boolean;
+            /**
+             * Source Quote
+             * @description Verbatim text from the notice.
+             */
+            source_quote?: string | null;
+        };
+        /** Requirement */
+        Requirement: {
+            /** Text */
+            text: string;
+            /** Mandatory */
+            mandatory: boolean;
+            category: components["schemas"]["RequirementCategory"];
+            /**
+             * Source Quote
+             * @description Verbatim text from the notice this requirement came from.
+             */
+            source_quote: string;
+        };
+        /**
+         * RequirementCategory
+         * @enum {string}
+         */
+        RequirementCategory: "eligibility" | "financial" | "experience" | "technical" | "personnel" | "equipment" | "other";
+        /** ReviewGap */
+        ReviewGap: {
+            /**
+             * Section Title
+             * @description Proposal section the gap is in; null if proposal-wide.
+             */
+            section_title?: string | null;
+            /** Issue */
+            issue: string;
+            severity: components["schemas"]["Severity"];
+            /** Suggestion */
+            suggestion?: string | null;
+        };
+        /** ReviewReport */
+        ReviewReport: {
+            scores: components["schemas"]["ReviewScores"];
+            /** Gaps */
+            gaps?: components["schemas"]["ReviewGap"][];
+            verdict: components["schemas"]["ReviewVerdict"];
+        };
+        /** ReviewScores */
+        ReviewScores: {
+            /** Completeness */
+            completeness: number;
+            /** Relevance */
+            relevance: number;
+            /** Compliance */
+            compliance: number;
+        };
+        /**
+         * ReviewVerdict
+         * @enum {string}
+         */
+        ReviewVerdict: "pass" | "fail";
+        /**
+         * Severity
+         * @enum {string}
+         */
+        Severity: "hard" | "soft";
+        /**
+         * Stage
+         * @enum {string}
+         */
+        Stage: "scout" | "matching" | "compliance" | "proposal" | "review";
+        /** TenderDetail */
+        TenderDetail: {
+            /** Id */
+            id: number;
+            /** Source Url */
+            source_url?: string | null;
+            status: components["schemas"]["TenderStatus"];
+            /** Deadline */
+            deadline?: string | null;
+            record?: components["schemas"]["TenderRecord"] | null;
+            match?: components["schemas"]["MatchResult"] | null;
+            compliance?: components["schemas"]["ComplianceReport"] | null;
+        };
+        /** TenderRecord */
+        TenderRecord: {
+            /** Title */
+            title: string;
+            /**
+             * Reference No
+             * @description IFB / notice number.
+             */
+            reference_no?: string | null;
+            /** Buyer */
+            buyer: string;
+            /** Buyer Address */
+            buyer_address?: string | null;
+            buyer_level: components["schemas"]["BuyerLevel"];
+            province?: components["schemas"]["Province"] | null;
+            /** District */
+            district?: string | null;
+            /**
+             * Location
+             * @description Site or delivery location as written.
+             */
+            location?: string | null;
+            /**
+             * Scope
+             * @description Short summary of what is being procured.
+             */
+            scope: string;
+            procurement_type: components["schemas"]["ProcurementType"];
+            method: components["schemas"]["ProcurementMethod"];
+            evaluation_method?: components["schemas"]["EvaluationMethod"] | null;
+            language: components["schemas"]["NoticeLanguage"];
+            /**
+             * Deadline Ad
+             * @description Submission deadline in AD, Nepal Time (UTC+05:45), only if the notice states an AD date.
+             */
+            deadline_ad?: string | null;
+            /**
+             * Deadline Bs Raw
+             * @description Submission deadline exactly as written in BS, verbatim.
+             */
+            deadline_bs_raw?: string | null;
+            /**
+             * Deadline Bs Iso
+             * @description deadline_bs_raw normalised to BS YYYY-MM-DD. Overwritten by deterministic code; never trusted from the LLM.
+             */
+            deadline_bs_iso?: string | null;
+            /**
+             * Currency
+             * @default NPR
+             */
+            currency: string;
+            /** Estimated Cost Npr */
+            estimated_cost_npr?: number | null;
+            bid_security?: components["schemas"]["BidSecurity"] | null;
+            /** Bid Validity Days */
+            bid_validity_days?: number | null;
+            /** Bid Doc Fee Npr */
+            bid_doc_fee_npr?: number | null;
+            /** Performance Security Percent */
+            performance_security_percent?: number | null;
+            /**
+             * Domestic Preference
+             * @default false
+             */
+            domestic_preference: boolean;
+            /**
+             * Jv Allowed
+             * @description null when the notice does not say.
+             */
+            jv_allowed?: boolean | null;
+            /** Required Docs */
+            required_docs?: components["schemas"]["RequiredDoc"][];
+            /** Requirements */
+            requirements?: components["schemas"]["Requirement"][];
+        };
+        /**
+         * TenderStatus
+         * @description Spec section 10.3 state machine.
+         * @enum {string}
+         */
+        TenderStatus: "new" | "extracted" | "matched" | "checked" | "drafted" | "reviewed" | "approved" | "skipped" | "blocked" | "failed";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -265,13 +710,20 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            501: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TenderDetail"][];
                 };
+            };
+            /** @description Not implemented yet */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -285,13 +737,20 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            501: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TenderDetail"][];
                 };
+            };
+            /** @description Not implemented yet */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -306,6 +765,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenderDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -315,14 +783,12 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Successful Response */
+            /** @description Not implemented yet */
             501: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
         };
     };
@@ -337,6 +803,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenderDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -346,14 +821,12 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Successful Response */
+            /** @description Not implemented yet */
             501: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
         };
     };
@@ -368,6 +841,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Proposal"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -377,14 +859,12 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Successful Response */
+            /** @description Not implemented yet */
             501: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
         };
     };
@@ -395,16 +875,36 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyProfile"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            501: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CompanyProfile"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Not implemented yet */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -439,6 +939,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Proposal"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -448,14 +957,12 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Successful Response */
+            /** @description Not implemented yet */
             501: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
         };
     };
@@ -501,6 +1008,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRun"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -510,14 +1026,12 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Successful Response */
+            /** @description Not implemented yet */
             501: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
         };
     };

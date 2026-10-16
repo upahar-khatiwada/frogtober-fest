@@ -54,7 +54,14 @@ Tenderly/
   README.md ARCHITECTURE.md AI_DISCLOSURE.md LICENSE
 ```
 
-Tender status state machine: `new → extracted → matched → checked → drafted → reviewed → approved`, with the branches `skipped` (score below threshold) and `blocked` (hard compliance failure).
+Tender status state machine: `new → extracted → matched → checked → drafted → reviewed → approved`, with the branches `skipped` (score below threshold), `blocked` (hard compliance failure) and `failed` (a stage's LLM output was invalid after one retry).
+
+## Contract layer
+
+- **Schemas:** `api/schemas/`, one module per stage (`tender.py`, `match.py`, `compliance.py`, `proposal.py`, `review.py`), plus `company.py`, `runs.py` (agent_runs record), `views.py` (API response shapes), `enums.py` (all enums, Nepal ones documented in [docs/NEPAL_CONTEXT.md](docs/NEPAL_CONTEXT.md) §11) and `_base.py` (the `Contract` base with `extra="forbid"`, `FiscalYearBS`, `BSDateISO`). Import from `schemas`.
+- **The LLM fills only these models:** `TenderRecord`, `MatchAssessment`, `ComplianceAssessment`, `ProposalSection`, `ReviewReport`. Code derives the rest: `MatchResult.from_assessment(a, threshold)` makes the pursue/skip decision, deterministic rules add `ComplianceItem`s with `rule_id`, and `ComplianceReport.is_blocked` does the gating.
+- **LLM client:** `pipeline.llm.LLMClient(run_recorder, settings=None, transport=None, timeout_s=None)`. `chat(stage=, messages=, schema=, tender_id=, temperature=)` returns a validated model or raises `LLMOutputError` / `LLMTransportError`, and always calls `run_recorder(AgentRunRecord)` exactly once. Temperature is fixed per stage (`STAGE_TEMPERATURE`), and only `proposal` may be overridden (≤0.7). `embed(texts)` returns `EMBED_DIM` (1024) vectors and writes no agent_runs row.
+- **Tests:** use `httpx.MockTransport` (see `FakeOllama` in `api/tests/conftest.py`). Never hit a real model in the default suite.
 
 ## Session protocol
 
@@ -70,11 +77,12 @@ Tender status state machine: `new → extracted → matched → checked → draf
 | Pull models | `./scripts/setup.sh` (bash/Git Bash/WSL), or manually: `docker compose exec ollama ollama pull <model>` |
 | Backend deps | `cd api && uv sync` |
 | Backend dev server | `cd api && uv run fastapi dev main.py` |
-| Backend tests | `cd api && uv run pytest -q` |
-| DB migrations | _(TBD - Prompt 2)_ |
-| Seed tenders | _(TBD - Prompt 2+)_ |
+| Backend tests | `cd api && uv run pytest -q` (offline; fake Ollama transport) |
+| Real-Ollama smoke test | `cd api && uv run pytest -m ollama` (needs Ollama at `LLM_BASE_URL` with `LLM_MODEL` + `EMBED_MODEL` pulled; skipped by default) |
+| DB migrations | _(TBD - Prompt 3)_ |
+| Seed tenders | _(TBD - Prompt 3+)_ |
 | Frontend deps | `cd web && bun install` |
 | Frontend dev server | `cd web && bun run dev` |
 | Frontend tests | `cd web && bun run test` |
 | E2E test | _(TBD - Playwright not set up yet)_ |
-| Regenerate API types | `cd web && bun run gen:api` (needs the API running locally on :8000) |
+| Regenerate API types | `cd web && bun run gen:api` (needs the API running locally on :8000, e.g. `cd api && uv run uvicorn main:app --port 8000`). Schemas only appear in the TS types if a route uses them as a request or response model. |

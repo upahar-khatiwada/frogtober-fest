@@ -17,6 +17,13 @@
 - `docker-compose.yml` (web, api, db [`pgvector/pgvector:pg16` with a `pg_isready` healthcheck], ollama), `scripts/setup.sh` (pulls chat + embed models), `.env.example`. Verified with `docker compose up --build`: web returns 200, api `/health` returns ok, ollama root responds "Ollama is running", db healthcheck confirmed implicitly (api's `depends_on: condition: service_healthy` only started because db passed its healthcheck). Pulled `bge-m3` successfully to prove the model-pull mechanism works; did **not** pull the 7B chat model end-to-end (see Open issues).
 - `CLAUDE.md` Commands table filled in with real, verified commands.
 
+### Prompt 2: contract layer (2026-10-16) ✅
+- `api/schemas/`: `TenderRecord` (with all the Nepal fields: procurement type/method/buyer level/province/district, AD + raw BS + normalised BS deadline, NPR amounts, `BidSecurity`, performance security %, domestic preference, JV, language, evaluation method, `RequiredDoc[]` with a normalised `DocType` and optional BS fiscal year, `Requirement[]` with category and source quote), `CompanyProfile` (PAN/VAT, registration date, `ContractorLicence[]` with class A–D and last-renewed FY, per-FY `AnnualTurnover[]`, JV partners, districts served), `MatchAssessment` → `MatchResult`, `ComplianceFinding`/`ComplianceAssessment` → `ComplianceItem`/`ComplianceReport` (`rule_id`, `is_blocked`), `ProposalSection`, `Proposal`, `ReviewReport` (scores completeness/relevance/compliance, gaps, verdict), `AgentRunRecord`/`AgentRun`, `TenderDetail`. Enums live in `enums.py` and are documented in NEPAL_CONTEXT.md §11.
+- `api/pipeline/llm.py`: `LLMClient` with schema-constrained `/api/chat` (`format` = Pydantic JSON schema with `$ref`s inlined), strict Pydantic validation, one retry that feeds the validation error back, per-call timeout (`LLM_TIMEOUT_S`, default 180 s), latency capture, one `AgentRunRecord` per call through a required `run_recorder` callback (on success *and* failure), per-stage temperatures, and `embed()` via `/api/embed` with a 1024-dim check.
+- Stub routes now declare request/response models (they still return 501), so the OpenAPI schema and `web/lib/api/types.ts` carry every contract. `bun run gen:api` was run and the types regenerated.
+- `httpx` moved from dev to runtime dependencies.
+- Tests: `uv run pytest -q` gives **44 passed, 1 deselected** (offline, `httpx.MockTransport`). They cover valid parses of every contract, retry-then-success, malformed → exactly one retry → `LLMOutputError` + failed run row, no string→int coercion, Nepal enum/format rejection (procurement type, method, buyer level, province, language, evaluation method, currency, BS date, fiscal year, doc type, contractor class), extra-field rejection, pass-without-chunk-id rejection, timeouts/HTTP errors, temperature rules, input-hash stability, and embedding dimension. `tests/test_llm_ollama_smoke.py` (`-m ollama`) was written but **not run**, because no Ollama was reachable locally.
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -26,8 +33,16 @@
 - **`fastapi[standard]` extra is required**, not plain `fastapi` — `fastapi dev`/`fastapi run` (used locally and in `api/Dockerfile`'s CMD) need the bundled `fastapi-cli`, which only ships via the `[standard]` extra.
 - **`api/`'s project layout is flat "app" style, not "library" style.** A bare `uv init --name tenderly-api` on newer uv versions can default to a `src/`-layout installable package (with a `[build-system]` section); we deliberately flattened it to match CLAUDE.md's repo layout (`api/main.py`, `api/routers/`, etc.), since nothing here is meant to be built/installed as a package.
 
+- **LLM output models are separate from code-decided models (Prompt 2).** The LLM never emits a decision that hard rule 5 reserves for code. `MatchAssessment` has no `decision` (it is computed from the threshold), and `ComplianceFinding` has no `rule_id`, so the LLM can't pose as a deterministic rule to get a chunk-less `pass` through.
+- **Validation is strict.** `extra="forbid"` on every contract, plus `model_validate_json(strict=True)` in the client, so `"72"` for an int or an invented key fails and is retried rather than coerced.
+- **`deadline_bs_iso` is code-owned.** It is in `TenderRecord` (so it is stored), but the Scout must overwrite it from `deadline_bs_raw` with the deterministic normaliser.
+- **`jv_allowed` and `evaluation_method` are nullable**, because "the notice is silent" is a real third state. `procurement_type` gets `unknown` (per NEPAL_CONTEXT §1).
+- **Added `TenderStatus.failed`** for hard rule 4 / spec §10.5 "clear failed state".
+- **Embedding calls write no agent_runs row.** They are not an agent stage, and ingest would otherwise log one row per chunk.
+- **The client is synchronous** (httpx `Client`). Agents will run in background jobs (APScheduler), so async adds nothing yet.
+
 ## Deviations from spec
-- None. (The spec allowed bge-m3 *or* nomic-embed-text; choosing bge-m3 is a selection within the spec, not a deviation. The shadcn/fastapi notes above are implementation realities, not spec deviations.)
+- None in behaviour. Additive fields beyond §8.1/§11: `TenderStatus.failed`, `AgentRunRecord.attempts/error/raw_output` (the `agent_runs` table needs these three columns when migrations land), `ReviewGap.severity`, `ComplianceItem.explanation`. (The spec allowed bge-m3 *or* nomic-embed-text; choosing bge-m3 is a selection within the spec.)
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -50,6 +65,14 @@ New (Prompt 1):
    - Point `LLM_BASE_URL`/`LLM_MODEL` at a hosted open-weight inference provider (e.g. one serving Qwen2.5/Llama, not a proprietary model) for day-to-day dev — CLAUDE.md hard rule 1 explicitly allows this as a config change.
    - Reserve local Docker + the 7B model for final demo rehearsal on whichever teammate's machine has the most RAM/VRAM.
 
+New (Prompt 2):
+13. **The real-Ollama smoke test has never run.** No Ollama was reachable on this machine (blocked on issue 12). Run `uv run pytest -m ollama` once a model is available (a small model such as `qwen2.5:1.5b-instruct` is fine for this plumbing check). It is still unverified that Ollama's grammar accepts our schemas' `pattern`/`format` keywords.
+14. **`bun run test` fails on this machine, before and independent of this prompt's change.** There is no Node.js on PATH, so vitest's worker runs under Bun and jsdom throws `addEventListener ... not a valid instance of EventTarget`. Prompt 1 verified it elsewhere. Options: switch the vitest environment to `happy-dom`, or document Node as a test-runtime requirement. Needs a team call (CLAUDE.md says Bun only).
+15. `bunx tsc --noEmit` reports `Cannot find name 'LayoutProps'` in `app/layout.tsx`. That is a Next.js-generated global that only exists after `next build`/`next typegen`, so it is not a real error. `bun run build` remains the type-check of record.
+
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
+
+## Next prompt
+Prompt 3: database + Scout. Add migrations for spec §11 (plus the `agent_runs.attempts/error/raw_output` columns and `tenders.status` values from `TenderStatus`), and a `run_recorder` that inserts `agent_runs` rows. Build the deterministic normalisers (Devanagari digits, Rs/NRs/रु., lakh/crore/million, BS date → `deadline_bs_iso`, BS→AD via a vetted library), then the Scout agent (`LLMClient.chat(stage=SCOUT, schema=TenderRecord)` + normalisers overwriting code-owned fields) and the seed dataset loader. Resolve open issues 12/13 first if possible.
 
