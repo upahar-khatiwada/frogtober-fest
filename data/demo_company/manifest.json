@@ -1,0 +1,34 @@
+{
+  "_comment": "FICTIONAL demo data for Tenderly. Company, people, numbers and certificates are invented. Read by api/scripts/seed_demo.py. Expiry dates are BS and converted to AD by code.",
+  "documents": [
+    {
+      "file": "01_company_registration.txt",
+      "doc_type": "company_registration",
+      "expires_on_bs": "2084-03-32",
+      "_note": "VALID: annual renewal recorded through FY 2083/84 (ends 2084 Asar 32 = 2027-07-16 AD)."
+    },
+    {
+      "file": "02_pan_vat_certificate.docx",
+      "doc_type": "pan_vat",
+      "_note": "No expiry."
+    },
+    {
+      "file": "03_tax_clearance_2081-82.pdf",
+      "doc_type": "tax_clearance",
+      "fiscal_year_bs": "2081/82",
+      "expires_on_bs": "2083-03-32",
+      "_note": "EXPIRED: FY 2081/82 clearance, usable until 2083 Asar 32 (2026-07-16 AD). A notice asking for FY 2082/83 should fail NP-TAX-CLEARANCE."
+    },
+    {
+      "file": "04_experience_certificate.docx",
+      "doc_type": "experience_certificate",
+      "value_npr": 18540000,
+      "_note": "Completed road works, NPR 1,85,40,000."
+    },
+    {
+      "file": "05_company_profile.pdf",
+      "doc_type": "company_profile",
+      "_note": "Capability statement: projects, personnel, equipment. Main proposal-RAG source."
+    }
+  ]
+}

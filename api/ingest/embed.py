@@ -1,7 +1,23 @@
-"""Embed chunks into pgvector via bge-m3 (spec section 11, AI_DISCLOSURE.md).
+"""Embed KB chunks with bge-m3 through the one LLM client (hard rule 3).
 
-TODO (next prompt): embed_chunks(...) calling pipeline.llm.embed (the one
-Ollama client - CLAUDE.md hard rule 3), storing VECTOR(1024) rows in
-kb_chunks. Dimension is fixed to bge-m3's 1024 (PROGRESS.md Decisions) -
-do not change without a migration.
+Dimension is fixed at EMBED_DIM = 1024 to match kb_chunks.embedding
+VECTOR(1024); `LLMClient.embed` already rejects any other size, and this
+module re-checks the count so a short batch can't misalign chunk rows.
 """
+
+from collections.abc import Sequence
+
+from pipeline.llm import LLMClient, LLMTransportError
+
+BATCH_SIZE = 16
+
+
+def embed_chunks(client: LLMClient, texts: Sequence[str], batch_size: int = BATCH_SIZE) -> list[list[float]]:
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), batch_size):
+        batch = list(texts[start : start + batch_size])
+        out = client.embed(batch)
+        if len(out) != len(batch):
+            raise LLMTransportError(f"asked for {len(batch)} embeddings, got {len(out)}")
+        vectors.extend(out)
+    return vectors

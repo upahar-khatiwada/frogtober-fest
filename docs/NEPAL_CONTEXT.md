@@ -164,6 +164,7 @@ These map directly onto `TenderRecord` fields: `buyer`, `buyer_address`, `scope`
 - **Lakh and crore:** 1 lakh = 100,000 and 1 crore = 10,000,000 = 100 lakh. Notices group digits the South Asian way, e.g. **"Rs 1,02,000.00"** (= 102,000) in the NRB notice cited in §4. Notices also mix "Million" and "lakh". Source for definitions: <https://en.wikipedia.org/wiki/Lakh>, <https://en.wikipedia.org/wiki/Crore> (secondary).
 - **Arab/Kharab:** 1 arab = 100 crore = 1,000,000,000. `[VERIFY]`
 - **Devanagari digits:** ० १ २ ३ ४ ५ ६ ७ ८ ९ (U+0966–U+096F): <https://www.unicode.org/charts/PDF/U0900.pdf>. The Scout must normalise them to ASCII before parsing amounts and dates.
+- **Devanagari in PDFs (observed 2026-10-17, Prompt 4):** text extraction is only as good as the PDF's font mapping. Legacy fonts (Preeti, Kantipur, etc.) map Devanagari glyphs onto ASCII codes, so extraction yields Latin garbage. Unicode fonts with incomplete ToUnicode maps lose conjuncts (e.g. PyMuPDF-generated `प्रमाणपत्र` extracts as `Śमाणपŕ`). `ingest/parse_docs.py` flags both cases with a warning and does not attempt conversion. A Preeti→Unicode converter is a possible later addition `[VERIFY]` (no library vetted).
 - **Deterministic parser requirements:** strip `Rs/NRs/रु.`, normalise Devanagari digits, remove commas in either grouping style, handle `lakh/लाख`, `crore/करोड`, `million`. Store the integer amount in NPR (`BIGINT`, per spec §11). Unit-test all of these.
 
 ## 10. Open `[VERIFY]` list (summary)
@@ -192,7 +193,7 @@ The Pydantic contracts encode these Nepal facts as enums. The JSON schema the LL
 | `BuyerLevel` | `federal`, `province`, `local`, `other` | §8 |
 | `Province` | `koshi`, `madhesh`, `bagmati`, `gandaki`, `lumbini`, `karnali`, `sudurpashchim` | §8 `[VERIFY]` names. `district` stays free text until the 77-district list is loaded. |
 | `NoticeLanguage` | `en`, `ne`, `mixed` | §6, §7 (Devanagari notices) |
-| `DocType` | `company_registration`, `business_licence`, `licence_renewal`, `pan_vat`, `tax_clearance`, `tax_return`, `self_declaration`, `power_of_attorney`, `bid_security`, `audit_report`, `experience_certificate`, `jv_agreement`, `other` | §3 (PPR Rule 40(2) list + real notices). `tax_return` is the Rule 40(2)(d) alternative to tax clearance. |
+| `DocType` | `company_registration`, `business_licence`, `licence_renewal`, `pan_vat`, `tax_clearance`, `tax_return`, `self_declaration`, `power_of_attorney`, `bid_security`, `audit_report`, `experience_certificate`, `jv_agreement`, `company_profile`, `other` | §3 (PPR Rule 40(2) list + real notices). `tax_return` is the Rule 40(2)(d) alternative to tax clearance. `company_profile` (added Prompt 4) is the bidder's capability statement (projects, personnel, equipment). It is not a statutory eligibility document, but it is the main proposal-RAG source. The same enum is the CHECK constraint on `documents.doc_type`, so a new value needs a migration. |
 | `RequirementCategory` | `eligibility`, `financial`, `experience`, `technical`, `personnel`, `equipment`, `other` | §3 (PPR Rule 28(3) criteria) |
 | `ContractorClass` | `A`, `B`, `C`, `D` | §3. Per-class limits are **not** encoded (sources conflict, `[VERIFY]`). |
 

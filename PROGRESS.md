@@ -29,6 +29,18 @@
 - Tests: `tests/test_nepal_{numbers,dates,geography,rules}.py`.
 - Deps added: `nepali-datetime`, `pyyaml`.
 
+### Prompt 4: database, KB ingestion, company endpoints, demo seed (2026-10-17) ✅
+- **DB:** SQLAlchemy 2 models (`api/db/models.py`) + Alembic (`api/alembic.ini`, `api/alembic/`, migration `0001_initial_schema`). Covers all 8 spec §11 tables, plus `CREATE EXTENSION vector`, `kb_chunks.embedding VECTOR(1024)` with an HNSW `vector_cosine_ops` index, and CHECK constraints that mirror every enum. Nepal columns: tenders `procurement_type, method, province, district, deadline_bs, estimated_cost_npr, language`; documents `doc_type, expires_on, fiscal_year_bs, value_npr` plus ingest bookkeeping (`content` BYTEA, `sha256`, `ingest_status`, `ingest_error`, `warnings[]`, `page_count`); company `pan_number, vat_number, licence_classes[], province`. Also agent_runs `attempts/error/raw_output` and compliance_items `rule_id/explanation`.
+- `db/search.py`: `search_chunks` (top-k by pgvector cosine distance, filters by company/doc_type, `ready` docs only, returns `ChunkHit` with `chunk_id` + similarity) and `retrieve` (embeds the query through `LLMClient`). `db/runs.py::make_run_recorder` writes agent_runs rows. `deps.py` provides the FastAPI dependencies.
+- **Ingestion:** `ingest/parse_docs.py` handles PDF (PyMuPDF), DOCX (python-docx, paragraphs + tables) and TXT (strict UTF-8, BOM/UTF-16 OK, otherwise a `ParseError`; never mojibake). Text is NFC-normalised, only control chars are stripped, and ZWJ/ZWNJ are kept. Flags: `needs_ocr` when no page has text; warnings for partly scanned pages, legacy Nepali fonts (Preeti etc.) and garbled conjuncts. `ingest/chunking.py` makes 400-600 estimated-token chunks with 80 overlap and splits on `.!?` and the danda. `ingest/embed.py::embed_chunks` batches through `LLMClient.embed`. `ingest/kb.py` covers create, parse, chunk, embed and `kb_chunks`, records the status, and is re-runnable.
+- **Endpoints:** `POST /company` (upsert of the single company), `GET /company`, `POST /company/documents` (multipart: `file`, `doc_type`, optional `expires_on` AD or `expires_on_bs` converted deterministically, `fiscal_year_bs`, `value_npr`; 202 + background ingest; 404/413/415/422/400 errors), `GET /company/documents` (status, chunk_count, warnings, computed `is_expired` against today in NPT).
+- **Demo data:** `data/demo_company/` holds `profile.json` (Annapurna Demo Nirman Sewa Pvt. Ltd., fictional, Pokhara, class C, turnover in NPR) and `manifest.json`, plus 5 documents: registration TXT (bilingual, **valid** to 2084-03-32 BS = 2027-07-16), PAN/VAT DOCX, tax clearance PDF for FY 2081/82 (**expired** 2083-03-32 BS = 2026-07-16), experience certificate DOCX (Rs 1,85,40,000) and a 2-page company profile PDF. All are marked FICTIONAL. `scripts/build_demo_docs.py` regenerates the binaries, and `scripts/seed_demo.py` seeds them.
+- Schemas: `DocType.company_profile`, `IngestStatus`, `CompanyView`, `CompanyDocumentView`. `web/lib/api/types.ts` regenerated.
+- `api/Dockerfile`: runs `alembic upgrade head` before `fastapi run`, and installs with `--no-dev`.
+- Deps: `sqlalchemy` 2.1, `alembic`, `psycopg[binary]`, `pgvector`, `pymupdf`, `python-docx`, `python-multipart`; dev: `pgserver` (embedded Postgres + pgvector for tests; no network/API use).
+- Fixed a wrong assertion in `tests/test_nepal_dates.py` (Chaitra 2082 is FY 2082/83, not 2081/82). It failed on clean HEAD, and the code was right.
+- **Verified:** `uv run pytest -q` gives **290 passed, 1 deselected**. That includes 19 DB/API tests + 1 seed test on a real Postgres+pgvector (pgserver): `alembic check` finds no model/migration drift, downgrade/upgrade round-trips, the column is `vector(1024)`, CHECKs reject bad enums, cosine ordering + filters work, the upload flow covers ready / needs_ocr / failed, and seed + retrieval pass. `alembic upgrade head` and `python -m scripts.seed_demo` were run from the CLI against a scratch DB. Seed exits 1 with `failed` docs when Ollama is down, as designed. **Not verified:** seed with real bge-m3 embeddings (no Ollama here) and the Docker image build (no Docker on this machine).
+
 
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
@@ -53,8 +65,19 @@
 - Bid/performance security, licence renewal, JV, domestic preference are `soft`.
 - `parse_npr` is strict: one number, NPR only, no fractional rupees.
 - Date-only BS deadlines are end of day NPT (23:59:59).
+- **Embedding dimension fixed at 1024 (bge-m3) in migration 0001.** A model change needs a migration and a re-embed.
+- **Enum columns are TEXT + CHECK**, not native PG enums. Constraint values are frozen in each migration, so a new enum value means a new migration (alembic check catches the drift).
+- **Token counts are estimated** (about 4 chars/token for Latin, 2 for Devanagari, 1 per punctuation mark) instead of shipping bge-m3's tokenizer. 400-600 is retrieval granularity, far below bge-m3's 8192 limit. Every chunk except the last is guaranteed 400-600; the last may be shorter.
+- **Ingestion is a FastAPI BackgroundTask**, and its state lives on the row (`ingest_status`). APScheduler isn't needed for this. The upload returns 202 and the UI polls `GET /company/documents`.
+- **Originals are stored in `documents.content` (BYTEA)**, so the export package can attach them without a shared volume (uploads capped at 20 MB).
+- **Single company:** `POST /company` upserts the lowest-id row (multi-tenant is out of scope).
+- **`is_expired` is computed in code** (expires_on < today NPT, hard rule 5). Expiry can be entered in BS and is converted with `nepal.dates`.
+- **Demo PDFs are English-only.** PyMuPDF-written Devanagari loses conjuncts on extraction, so Devanagari lives in the TXT/DOCX demo docs.
+- **DB tests run by default** on an embedded pgserver Postgres, or on `TEST_DATABASE_URL`. They skip only if neither is available.
 
 ## Deviations from spec
+- §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
+- `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
 - None in behaviour. Additive fields beyond §8.1/§11: `TenderStatus.failed`, `AgentRunRecord.attempts/error/raw_output` (the `agent_runs` table needs these three columns when migrations land), `ReviewGap.severity`, `ComplianceItem.explanation`. (The spec allowed bge-m3 *or* nomic-embed-text; choosing bge-m3 is a selection within the spec.)
 none known, spec §8.2/§13 not re-read in this session (PDF not available to me)
 
@@ -72,9 +95,9 @@ none known, spec §8.2/§13 not re-read in this session (PDF not available to me
 10. PPMO blacklist URL.
 11. Whether lowest-price acceptance is the general sealed-quotation rule.
 16. Verify spec §8.2 and §13 against api/nepal/ (not read this session).
-17. `nepali-datetime` API was used from memory and tests were not run when written: run `uv run pytest -q` first. Library range (about 1975-2100 BS) is its own limit.
+17. ~~`nepali-datetime` tests not run~~: run in Prompt 4. All pass after fixing one wrong test assertion. The library range (about 1975-2100 BS) is still its own limit.
 18. `TenderRecord` has no structured turnover/experience criteria; `TenderCriteria` is passed separately. Scout should extract them.
-19. `CompanyProfile` has no project history; experience comes from `DocumentMeta` (`similar`, `value_npr`). Needs a `kb_documents` metadata table.
+19. `CompanyProfile` has no project history; experience comes from `DocumentMeta` (`similar`, `value_npr`). The `documents` table now holds `doc_type/expires_on/fiscal_year_bs/value_npr`. Still missing: a loader that turns `documents` rows into `DocumentMeta` (which chunk id cites a document? its first chunk?) and the `similar` classification.
 20. Bid-security validity start date (deadline vs. bid-validity end) is an assumption.
 21. Municipalities (753) are not mapped; only district/province.
 22. `parse_bs_date` cannot tell an AD date from a BS date; callers must know it is BS.
@@ -91,11 +114,16 @@ New (Prompt 2):
 14. **`bun run test` fails on this machine, before and independent of this prompt's change.** There is no Node.js on PATH, so vitest's worker runs under Bun and jsdom throws `addEventListener ... not a valid instance of EventTarget`. Prompt 1 verified it elsewhere. Options: switch the vitest environment to `happy-dom`, or document Node as a test-runtime requirement. Needs a team call (CLAUDE.md says Bun only).
 15. `bunx tsc --noEmit` reports `Cannot find name 'LayoutProps'` in `app/layout.tsx`. That is a Next.js-generated global that only exists after `next build`/`next typegen`, so it is not a real error. `bun run build` remains the type-check of record.
 
+New (Prompt 4):
+23. **Seed with real embeddings not run.** No Ollama on this machine, so run `uv run python -m scripts.seed_demo` once `bge-m3` is pulled (issue 12/13).
+24. **Docker image not rebuilt/verified** after the Dockerfile change (migrations on start, `--no-dev`). There is no Docker here. Check with `docker compose up --build`. The seed runs from the host, because `data/` is outside the api build context.
+25. **`bun run build` fails on this machine at "Collecting page data"** (`Expected CommonJS module to have a function wrapper ... bug in Bun`). It is identical on clean HEAD, and TypeScript type-checking passes. Same root cause as issue 14 (no Node on PATH).
+26. Duplicate uploads (same `sha256`) are allowed. Add a dedupe or replace option if the UI needs it. There is no re-ingest or delete endpoint yet (the seed re-ingests by deleting and recreating).
+27. No Preeti-to-Unicode conversion; such PDFs only get a warning (NEPAL_CONTEXT section 9).
+28. Starlette warns that `TestClient` with `httpx` is deprecated (`httpx2`). Not ours to fix yet.
+
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
 ## Next prompt
-Prompt 3: database + Scout. Add migrations for spec §11 (plus the `agent_runs.attempts/error/raw_output` columns and `tenders.status` values from `TenderStatus`), and a `run_recorder` that inserts `agent_runs` rows. Build the deterministic normalisers (Devanagari digits, Rs/NRs/रु., lakh/crore/million, BS date → `deadline_bs_iso`, BS→AD via a vetted library), then the Scout agent (`LLMClient.chat(stage=SCOUT, schema=TenderRecord)` + normalisers overwriting code-owned fields) and the seed dataset loader. Resolve open issues 12/13 first if possible.
-Prompt 4: DB migrations + run_recorder + Scout (wire deadline_from_raw, parse_npr into TenderRecord post-processing; add TenderCriteria extraction), document metadata table feeding DocumentMeta.
-
-
+Prompt 5: Scout + tenders. Wire the DB-backed `run_recorder` (`db.make_run_recorder`, done) into the orchestrator. Build the Scout agent (`LLMClient.chat(stage=SCOUT, schema=TenderRecord)`, then `deadline_from_raw` / `parse_npr` overwrite code-owned fields, then fill the denormalised `tenders` columns) and add `TenderCriteria` extraction. Write the seed tender dataset (30-40, data/tenders/) with a loader and `POST /tenders/scrape`. Write the `documents` -> `DocumentMeta` loader so `nepal.rules.evaluate_rules` can run against the demo company (expect NP-TAX-CLEARANCE to fail on the expired FY 2081/82 clearance). Resolve open issues 12/13 first if possible, then run the seed with real embeddings (issue 23).

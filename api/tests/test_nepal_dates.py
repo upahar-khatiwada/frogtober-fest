@@ -86,7 +86,7 @@ def test_fiscal_year_boundaries():
     assert fiscal_year_of(BSDate(2082, 4, 1)) == "2082/83"  # Shrawan 1
     assert fiscal_year_of(BSDate(2082, 3, days_in_bs_month(2082, 3))) == "2081/82"  # last day of Asar
     assert fiscal_year_of(BSDate(2082, 1, 1)) == "2081/82"
-    assert fiscal_year_of(BSDate(2082, 12, 5)) == "2081/82"
+    assert fiscal_year_of(BSDate(2082, 12, 5)) == "2082/83"  # Chaitra 2082 is after Shrawan 2082
     assert fiscal_year_of(BSDate(2099, 4, 1)) == "2099/00"
     for fy in ("2082/83", "2081/82", "2099/00"):
         TypeAdapter(FiscalYearBS).validate_python(fy)

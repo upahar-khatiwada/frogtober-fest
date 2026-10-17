@@ -75,6 +75,7 @@ class DocType(StrEnum):
     AUDIT_REPORT = "audit_report"
     EXPERIENCE_CERTIFICATE = "experience_certificate"
     JV_AGREEMENT = "jv_agreement"
+    COMPANY_PROFILE = "company_profile"  # capability statement: services, projects, personnel, equipment
     OTHER = "other"
 
 
@@ -143,6 +144,16 @@ class ComplianceStatus(StrEnum):
 class Severity(StrEnum):
     HARD = "hard"  # a fail blocks proposal generation
     SOFT = "soft"
+
+
+class IngestStatus(StrEnum):
+    """Knowledge-base ingestion state of an uploaded company document."""
+
+    PENDING = "pending"  # stored, waiting for the background ingest
+    PROCESSING = "processing"
+    READY = "ready"  # parsed, chunked and embedded
+    NEEDS_OCR = "needs_ocr"  # scanned PDF with no extractable text (no OCR in MVP)
+    FAILED = "failed"  # parse or embedding error; see ingest_error
 
 
 class ReviewVerdict(StrEnum):
