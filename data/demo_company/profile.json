@@ -1,0 +1,32 @@
+{
+  "name": "Annapurna Demo Nirman Sewa Pvt. Ltd.",
+  "sectors": ["civil works", "rural roads", "drainage and culverts", "small public buildings"],
+  "services": "Gravel and blacktop rural roads, side drains and culverts, gabion and stone-masonry retaining walls, and small public buildings (ward offices, school blocks, health posts) for local governments in Gandaki Province.",
+  "location": "Pokhara Metropolitan City-8, Kaski",
+  "province": "gandaki",
+  "districts_served": ["Kaski", "Tanahun", "Syangja", "Parbat", "Lamjung"],
+  "pan_number": "999123456",
+  "vat_number": "999123456",
+  "registration_date": "2015-03-12",
+  "licences": [
+    {
+      "licence_type": "construction",
+      "licence_class": "C",
+      "licence_number": "DEMO-C-0421",
+      "issuing_body": "Federal construction licensing authority (fictional demo record)",
+      "last_renewed_fy_bs": "2083/84"
+    }
+  ],
+  "turnover": [
+    {"fiscal_year_bs": "2079/80", "amount_npr": 42000000},
+    {"fiscal_year_bs": "2080/81", "amount_npr": 51000000},
+    {"fiscal_year_bs": "2081/82", "amount_npr": 58000000}
+  ],
+  "certifications": [],
+  "jv_partners": [
+    {
+      "name": "Machhapuchchhre Demo Builders Pvt. Ltd.",
+      "notes": "Fictional JV partner for works above the company's own capacity."
+    }
+  ]
+}

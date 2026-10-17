@@ -9,13 +9,16 @@ WORKDIR /app
 
 # Install deps first (better layer caching), then copy the rest of the app.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project
+# --no-dev: pytest/pgserver (embedded test Postgres) stay out of the image.
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY . .
-RUN uv sync --frozen
+RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["uv", "run", "fastapi", "run", "main.py", "--host", "0.0.0.0", "--port", "8000"]
+# Apply DB migrations, then serve. (Binaries come from .venv/bin on PATH; `uv run`
+# would re-sync the dev group.)
+CMD ["sh", "-c", "alembic upgrade head && fastapi run main.py --host 0.0.0.0 --port 8000"]

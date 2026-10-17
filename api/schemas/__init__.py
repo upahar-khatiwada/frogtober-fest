@@ -15,6 +15,7 @@ from schemas.enums import (
     ContractorClass,
     DocType,
     EvaluationMethod,
+    IngestStatus,
     MatchDecision,
     NoticeLanguage,
     ProcurementMethod,
@@ -32,7 +33,7 @@ from schemas.proposal import Proposal, ProposalSection
 from schemas.review import ReviewGap, ReviewReport, ReviewScores
 from schemas.runs import AgentRun, AgentRunRecord
 from schemas.tender import BidSecurity, RequiredDoc, Requirement, TenderRecord
-from schemas.views import TenderDetail
+from schemas.views import CompanyDocumentView, CompanyView, TenderDetail
 
 __all__ = [
     "AgentRun",
@@ -40,7 +41,9 @@ __all__ = [
     "AnnualTurnover",
     "BidSecurity",
     "BuyerLevel",
+    "CompanyDocumentView",
     "CompanyProfile",
+    "CompanyView",
     "ComplianceAssessment",
     "ComplianceFinding",
     "ComplianceItem",
@@ -50,6 +53,7 @@ __all__ = [
     "ContractorLicence",
     "DocType",
     "EvaluationMethod",
+    "IngestStatus",
     "JVPartner",
     "MatchAssessment",
     "MatchDecision",

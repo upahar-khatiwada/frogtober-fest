@@ -111,7 +111,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Company */
+        get: operations["get_company_company_get"];
         put?: never;
         /**
          * Upsert Company
@@ -131,11 +132,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Company Documents
+         * @description Uploaded documents with ingestion status and computed expiry.
+         */
+        get: operations["list_company_documents_company_documents_get"];
         put?: never;
         /**
          * Upload Company Document
-         * @description Upload document; parse, chunk, embed (ingest/parse_docs.py, ingest/embed.py).
+         * @description Upload document; parse, chunk and embed it in the background. Poll GET /company/documents.
          */
         post: operations["upload_company_document_company_documents_post"];
         delete?: never;
@@ -296,11 +301,79 @@ export interface components {
              */
             validity_days?: number | null;
         };
+        /** Body_upload_company_document_company_documents_post */
+        Body_upload_company_document_company_documents_post: {
+            /**
+             * File
+             * @description PDF, DOCX or UTF-8 TXT
+             */
+            file: string;
+            doc_type: components["schemas"]["DocType"];
+            /**
+             * Expires On
+             * @description Expiry date (AD)
+             */
+            expires_on?: string | null;
+            /**
+             * Expires On Bs
+             * @description Expiry date (BS, e.g. 2084-03-31); converted to AD
+             */
+            expires_on_bs?: string | null;
+            /**
+             * Fiscal Year Bs
+             * @description BS fiscal year the document covers, e.g. "2082/83"
+             */
+            fiscal_year_bs?: string | null;
+            /**
+             * Value Npr
+             * @description Contract value or guarantee amount, NPR
+             */
+            value_npr?: number | null;
+        };
         /**
          * BuyerLevel
          * @enum {string}
          */
         BuyerLevel: "federal" | "province" | "local" | "other";
+        /**
+         * CompanyDocumentView
+         * @description An uploaded KB document and its ingestion state (GET /company/documents).
+         */
+        CompanyDocumentView: {
+            /** Id */
+            id: number;
+            /** Filename */
+            filename: string;
+            doc_type: components["schemas"]["DocType"];
+            /** Expires On */
+            expires_on?: string | null;
+            /**
+             * Is Expired
+             * @description expires_on is before today (NPT). Computed by code; null if no expiry.
+             */
+            is_expired?: boolean | null;
+            /** Fiscal Year Bs */
+            fiscal_year_bs?: string | null;
+            /** Value Npr */
+            value_npr?: number | null;
+            ingest_status: components["schemas"]["IngestStatus"];
+            /** Ingest Error */
+            ingest_error?: string | null;
+            /** Warnings */
+            warnings?: string[];
+            /** Page Count */
+            page_count?: number | null;
+            /**
+             * Chunk Count
+             * @default 0
+             */
+            chunk_count: number;
+            /**
+             * Uploaded At
+             * Format: date-time
+             */
+            uploaded_at: string;
+        };
         /** CompanyProfile */
         CompanyProfile: {
             /** Name */
@@ -337,6 +410,53 @@ export interface components {
             certifications?: string[];
             /** Jv Partners */
             jv_partners?: components["schemas"]["JVPartner"][];
+        };
+        /**
+         * CompanyView
+         * @description The stored company profile (single-company MVP).
+         */
+        CompanyView: {
+            /** Name */
+            name: string;
+            /** Sectors */
+            sectors?: string[];
+            /**
+             * Services
+             * @default
+             */
+            services: string;
+            /** Location */
+            location?: string | null;
+            province?: components["schemas"]["Province"] | null;
+            /** Districts Served */
+            districts_served?: string[];
+            /** Pan Number */
+            pan_number?: string | null;
+            /** Vat Number */
+            vat_number?: string | null;
+            /**
+             * Registration Date
+             * @description Company registration date (AD).
+             */
+            registration_date?: string | null;
+            /** Licences */
+            licences?: components["schemas"]["ContractorLicence"][];
+            /**
+             * Turnover
+             * @description One entry per BS fiscal year.
+             */
+            turnover?: components["schemas"]["AnnualTurnover"][];
+            /** Certifications */
+            certifications?: string[];
+            /** Jv Partners */
+            jv_partners?: components["schemas"]["JVPartner"][];
+            /** Id */
+            id: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** ComplianceItem */
         ComplianceItem: {
@@ -404,7 +524,7 @@ export interface components {
          * @description Normalised eligibility/qualification document types (PPR Rule 40(2) + real notices).
          * @enum {string}
          */
-        DocType: "company_registration" | "business_licence" | "licence_renewal" | "pan_vat" | "tax_clearance" | "tax_return" | "self_declaration" | "power_of_attorney" | "bid_security" | "audit_report" | "experience_certificate" | "jv_agreement" | "other";
+        DocType: "company_registration" | "business_licence" | "licence_renewal" | "pan_vat" | "tax_clearance" | "tax_return" | "self_declaration" | "power_of_attorney" | "bid_security" | "audit_report" | "experience_certificate" | "jv_agreement" | "company_profile" | "other";
         /**
          * EvaluationMethod
          * @enum {string}
@@ -415,6 +535,12 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * IngestStatus
+         * @description Knowledge-base ingestion state of an uploaded company document.
+         * @enum {string}
+         */
+        IngestStatus: "pending" | "processing" | "ready" | "needs_ocr" | "failed";
         /** JVPartner */
         JVPartner: {
             /** Name */
@@ -868,6 +994,33 @@ export interface operations {
             };
         };
     };
+    get_company_company_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyView"];
+                };
+            };
+            /** @description No company profile yet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     upsert_company_company_post: {
         parameters: {
             query?: never;
@@ -887,7 +1040,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompanyProfile"];
+                    "application/json": components["schemas"]["CompanyView"];
                 };
             };
             /** @description Validation Error */
@@ -899,12 +1052,25 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Not implemented yet */
-            501: {
+        };
+    };
+    list_company_documents_company_documents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CompanyDocumentView"][];
+                };
             };
         };
     };
@@ -915,15 +1081,49 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_company_document_company_documents_post"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            501: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CompanyDocumentView"];
+                };
+            };
+            /** @description No company profile yet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
