@@ -203,3 +203,22 @@ The Pydantic contracts encode these Nepal facts as enums. The JSON schema the LL
 - Amounts are integer NPR (`estimated_cost_npr`, `bid_security.amount_npr`, `bid_doc_fee_npr`), produced by the §9 normaliser. No statutory % is ever used to fill a value (§4).
 - `jv_allowed` is nullable: `null` means the notice is silent, which is different from `false`.
 - PAN/VAT numbers are stored as free strings. No format check is enforced because the format is not in this document. `[VERIFY]`
+
+
+## 12. Rules implemented (api/nepal/rules.yaml)
+
+| Rule id | Check | Basis in this doc | Verified | Severity |
+|---|---|---|---|---|
+| NP-DEADLINE | deadline not passed (NPT) | PPA s.14, hard rule 5 | yes | hard |
+| NP-REG-DOCS | registration, business licence, self-declaration (+ power of attorney if the notice lists it) on file, unexpired | PPR-EN Rule 40(2)(a),(b),(e) | yes (2008 text) | hard |
+| NP-PAN-VAT | PAN on profile + pan_vat doc; number format NOT validated | Rule 40(2)(c); section 10 item 11 | yes (presence only) | hard |
+| NP-TAX-CLEARANCE | clearance or tax-return proof for the notice's FY | Rule 40(2)(d), real notices (section 3) | yes | hard |
+| NP-LICENCE-RENEWAL | construction licence renewed for the deadline's FY (works only) | section 3, Construction Business Act reported secondhand | NO [VERIFY] | soft |
+| NP-TURNOVER | avg of last N completed FYs >= notice minimum; needs audit reports | Rule 28(3) wording [VERIFY] | NO | hard (threshold from notice) |
+| NP-EXPERIENCE | count and value of similar projects >= notice minimums | Rule 28(3) [VERIFY] | NO | hard (threshold from notice) |
+| NP-BID-SECURITY | amount and valid-until from notice; compares guarantee on file | PPA s.14, s.20; no statutory % used | yes | soft |
+| NP-PERF-SECURITY | amount from the notice's percent; never pass | Rule 110(2) | yes | soft |
+| NP-JV | JV route exists if turnover/experience failed; pooling (28(4)) not evaluated | Rule 28 | yes | soft |
+| NP-DOMESTIC-PREF | flag only, no percentage applied | Rules 17, 64(4) [VERIFY] | NO | soft |
+
+Assumptions (unverified): security validity counts from the submission deadline; turnover window is the N most recent completed FYs before the deadline's FY; date-only deadlines mean end of day NPT.
