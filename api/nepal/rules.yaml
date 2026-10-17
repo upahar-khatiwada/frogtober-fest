@@ -1,0 +1,115 @@
+# Rules as data. Seeded from docs/NEPAL_CONTEXT.md only.
+# verified: false  => the underlying fact is marked [VERIFY] there. Thresholds come from the
+# tender notice (NEPAL_CONTEXT section 4), never from statute defaults.
+rules:
+  - id: NP-DEADLINE
+    description: Submission deadline has not passed (Nepal time).
+    applies_to: {procurement_types: [], methods: []}
+    check: deadline_not_passed
+    parameters: {}
+    severity: hard
+    source: https://nepallaws.com/Laws/public-procurement-act-2063/chapter-3-provisions-relating-to-bid/section-14-invitation-to-bids/
+    verified: true
+    notes: Date-only deadlines are treated as end of day NPT.
+
+  - id: NP-REG-DOCS
+    description: Registration documents required for eligibility are on file and unexpired at the deadline.
+    applies_to: {procurement_types: [], methods: []}
+    check: required_documents_present
+    parameters:
+      statutory_doc_types: [company_registration, business_licence, self_declaration]
+      also_from_notice: [power_of_attorney]
+    severity: hard
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: true
+    notes: PPR-EN Rule 40(2)(a),(b),(e) from the 2008 text; the notice may add documents.
+
+  - id: NP-PAN-VAT
+    description: PAN on company profile and PAN/VAT certificate on file.
+    applies_to: {procurement_types: [], methods: []}
+    check: pan_vat_present
+    parameters: {}
+    severity: hard
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: true
+    notes: PPR-EN Rule 40(2)(c). Number format is NOT validated (NEPAL_CONTEXT section 10, item 11).
+
+  - id: NP-TAX-CLEARANCE
+    description: Tax clearance (or tax-return proof) on file for each fiscal year the notice requires.
+    applies_to: {procurement_types: [], methods: []}
+    check: tax_clearance_current
+    parameters: {}
+    severity: hard
+    source: https://www.dakshinkalimun.gov.np/sites/dakshinkalimun.gov.np/files/%5BDownload%5D%20Bolpatra%202078-07-17.pdf
+    verified: true
+    notes: PPR-EN Rule 40(2)(d); the fiscal year comes from the notice.
+
+  - id: NP-LICENCE-RENEWAL
+    description: Construction licence renewed for the fiscal year of the submission deadline.
+    applies_to: {procurement_types: [works], methods: []}
+    check: licence_renewed
+    parameters: {licence_type_contains: construction}
+    severity: soft
+    source: https://www.sharesansar.com/newsdetail/ministry-of-infrastructure-development-revokes-licenses-of-44-construction-firms-2026-07-08
+    verified: false
+    notes: Annual renewal is reported secondhand [VERIFY against the Construction Business Act text]. Soft until verified.
+
+  - id: NP-TURNOVER
+    description: Average annual turnover over the notice's look-back window meets the notice's minimum.
+    applies_to: {procurement_types: [], methods: []}
+    check: min_avg_turnover
+    parameters: {}
+    severity: hard
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: false
+    notes: Rule 28(3) lists the criteria; exact wording [VERIFY]. Threshold and years come from the notice. Window = the N most recent completed fiscal years before the deadline's FY (assumption).
+
+  - id: NP-EXPERIENCE
+    description: Count and value of similar completed projects meet the notice's minimums.
+    applies_to: {procurement_types: [], methods: []}
+    check: similar_experience
+    parameters: {}
+    severity: hard
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: false
+    notes: Rule 28(3) [VERIFY]. "Similar" is decided upstream, not here.
+
+  - id: NP-BID-SECURITY
+    description: Bid security guarantee covers the notice's amount until the notice's validity date.
+    applies_to: {procurement_types: [], methods: []}
+    check: bid_security_check
+    parameters: {}
+    severity: soft
+    source: https://nepallaws.com/Laws/public-procurement-act-2063/chapter-3-provisions-relating-to-bid/section-14-invitation-to-bids/
+    verified: true
+    notes: Amount and validity from the notice only. Validity is counted from the submission deadline (assumption; PPA s.20 convention for bid validity). Statutory 2.5% / +30 days are not used.
+
+  - id: NP-PERF-SECURITY
+    description: Performance security amount, from the notice's stated percent.
+    applies_to: {procurement_types: [], methods: []}
+    check: performance_security_info
+    parameters: {}
+    severity: soft
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: true
+    notes: Rule 110(2) establishes the instrument; the percent comes from the notice. Furnished after award, so never a pass.
+
+  - id: NP-JV
+    description: A JV route exists when a qualification rule fails.
+    applies_to: {procurement_types: [], methods: []}
+    check: jv_route
+    parameters: {when_failed: [NP-TURNOVER, NP-EXPERIENCE]}
+    severity: soft
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: true
+    notes: PPR-EN Rule 28. Pooled qualification (28(4)) is not evaluated; partner data is not modelled.
+
+  - id: NP-DOMESTIC-PREF
+    description: Notice grants domestic preference; flag only.
+    applies_to: {procurement_types: [], methods: []}
+    check: domestic_preference_flag
+    parameters: {}
+    severity: soft
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: false
+    notes: Rule 17 (10%) and Rule 64(4) [VERIFY]. No percentage is applied.

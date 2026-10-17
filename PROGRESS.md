@@ -24,6 +24,12 @@
 - `httpx` moved from dev to runtime dependencies.
 - Tests: `uv run pytest -q` gives **44 passed, 1 deselected** (offline, `httpx.MockTransport`). They cover valid parses of every contract, retry-then-success, malformed → exactly one retry → `LLMOutputError` + failed run row, no string→int coercion, Nepal enum/format rejection (procurement type, method, buyer level, province, language, evaluation method, currency, BS date, fiscal year, doc type, contractor class), extra-field rejection, pass-without-chunk-id rejection, timeouts/HTTP errors, temperature rules, input-hash stability, and embedding dimension. `tests/test_llm_ollama_smoke.py` (`-m ollama`) was written but **not run**, because no Ollama was reachable locally.
 
+### Prompt 3: deterministic Nepal layer (2026-10-17)
+- `api/nepal/`: `numbers.py` (parse_npr, format_npr, humanize_npr, Devanagari digits), `dates.py` (BS parse/format, BS<->AD via `nepali-datetime`, NPT, fiscal year, days_left, deadline_from_raw), `geography.py` (7 provinces, 77 districts, EN+NE, spellings, normalize_location), `rules.yaml` (11 rules), `rules.py` (loader, bid/performance security calculators, evaluator returning `ComplianceItem`s with `rule_id`).
+- Tests: `tests/test_nepal_{numbers,dates,geography,rules}.py`.
+- Deps added: `nepali-datetime`, `pyyaml`.
+
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -40,9 +46,17 @@
 - **Added `TenderStatus.failed`** for hard rule 4 / spec §10.5 "clear failed state".
 - **Embedding calls write no agent_runs row.** They are not an agent stage, and ingest would otherwise log one row per chunk.
 - **The client is synchronous** (httpx `Client`). Agents will run in background jobs (APScheduler), so async adds nothing yet.
+- Security amounts and validity come from the notice only. No statutory % or +30 days. Validity is counted from the submission deadline (assumption, unverified).
+- Rule thresholds for turnover/experience come from `TenderCriteria` (notice), not statute.
+- "Pass" needs evidence (chunk id from document metadata, or a named profile/notice field). Enforced in one place (`rules.o`).
+- Missing document of a required type is `fail`; document present without chunk id is `unclear`.
+- Bid/performance security, licence renewal, JV, domestic preference are `soft`.
+- `parse_npr` is strict: one number, NPR only, no fractional rupees.
+- Date-only BS deadlines are end of day NPT (23:59:59).
 
 ## Deviations from spec
 - None in behaviour. Additive fields beyond §8.1/§11: `TenderStatus.failed`, `AgentRunRecord.attempts/error/raw_output` (the `agent_runs` table needs these three columns when migrations land), `ReviewGap.severity`, `ComplianceItem.explanation`. (The spec allowed bge-m3 *or* nomic-embed-text; choosing bge-m3 is a selection within the spec.)
+none known, spec §8.2/§13 not re-read in this session (PDF not available to me)
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -57,6 +71,13 @@
 9. BS↔AD library choice.
 10. PPMO blacklist URL.
 11. Whether lowest-price acceptance is the general sealed-quotation rule.
+16. Verify spec §8.2 and §13 against api/nepal/ (not read this session).
+17. `nepali-datetime` API was used from memory and tests were not run when written: run `uv run pytest -q` first. Library range (about 1975-2100 BS) is its own limit.
+18. `TenderRecord` has no structured turnover/experience criteria; `TenderCriteria` is passed separately. Scout should extract them.
+19. `CompanyProfile` has no project history; experience comes from `DocumentMeta` (`similar`, `value_npr`). Needs a `kb_documents` metadata table.
+20. Bid-security validity start date (deadline vs. bid-validity end) is an assumption.
+21. Municipalities (753) are not mapped; only district/province.
+22. `parse_bs_date` cannot tell an AD date from a BS date; callers must know it is BS.
 
 New (Prompt 1):
 12. **Local dev hardware (8GB RAM / 4GB VRAM) can't comfortably run the pinned 7B chat model (Qwen2.5-7B-Instruct)** via Docker's `ollama` service — a 4-bit-quantized 7B model is ~4.7GB, tight alongside Windows + Docker Desktop + the other three containers. Verified the pull mechanism with the much lighter `bge-m3` embedding model instead; did not attempt the full 7B pull. **Team decision needed before Prompt 2 starts calling the LLM for real.** Options, roughly in order of preference:
@@ -75,4 +96,6 @@ Other:
 
 ## Next prompt
 Prompt 3: database + Scout. Add migrations for spec §11 (plus the `agent_runs.attempts/error/raw_output` columns and `tenders.status` values from `TenderStatus`), and a `run_recorder` that inserts `agent_runs` rows. Build the deterministic normalisers (Devanagari digits, Rs/NRs/रु., lakh/crore/million, BS date → `deadline_bs_iso`, BS→AD via a vetted library), then the Scout agent (`LLMClient.chat(stage=SCOUT, schema=TenderRecord)` + normalisers overwriting code-owned fields) and the seed dataset loader. Resolve open issues 12/13 first if possible.
+Prompt 4: DB migrations + run_recorder + Scout (wire deadline_from_raw, parse_npr into TenderRecord post-processing; add TenderCriteria extraction), document metadata table feeding DocumentMeta.
+
 

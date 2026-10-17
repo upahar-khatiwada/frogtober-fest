@@ -52,6 +52,8 @@ Tenderly/
     tests/
   docker-compose.yml
   README.md ARCHITECTURE.md AI_DISCLOSURE.md LICENSE
+
+- **Nepal layer:** `api/nepal/` (`numbers.py`, `dates.py`, `geography.py`, `rules.yaml`, `rules.py`). Deterministic, no LLM. Rules evaluator: `nepal.rules.evaluate_rules(tender, company, documents, criteria=, now=)` returns `ComplianceItem`s with `rule_id`. Import from `nepal`.
 ```
 
 Tender status state machine: `new → extracted → matched → checked → drafted → reviewed → approved`, with the branches `skipped` (score below threshold), `blocked` (hard compliance failure) and `failed` (a stage's LLM output was invalid after one retry).
@@ -86,3 +88,4 @@ Tender status state machine: `new → extracted → matched → checked → draf
 | Frontend tests | `cd web && bun run test` |
 | E2E test | _(TBD - Playwright not set up yet)_ |
 | Regenerate API types | `cd web && bun run gen:api` (needs the API running locally on :8000, e.g. `cd api && uv run uvicorn main:app --port 8000`). Schemas only appear in the TS types if a route uses them as a request or response model. |
+| Nepal layer tests | `cd api && uv run pytest -q tests/test_nepal_numbers.py tests/test_nepal_dates.py tests/test_nepal_geography.py tests/test_nepal_rules.py` |
