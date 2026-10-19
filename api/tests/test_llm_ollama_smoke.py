@@ -36,3 +36,17 @@ def test_real_ollama_chat_and_embed():
     assert 0 <= result.score <= 100
     assert runs[0].ok
     assert len(vectors[0]) == EMBED_DIM
+
+
+def test_real_ollama_scout_on_seed_001():
+    """Plumbing: Ollama's grammar accepts the TenderExtraction schema and post-processing runs on real output."""
+    from pathlib import Path
+
+    from agents.scout import extract_tender
+
+    text = (Path(__file__).resolve().parents[2] / "data" / "seed_tenders" / "001_bhanu_road_gravelling.txt").read_text(encoding="utf-8")
+    runs = []
+    with LLMClient(runs.append) as client:
+        record = extract_tender(client, text)
+    assert runs[0].ok and runs[0].stage is Stage.SCOUT
+    assert record.title and record.sources

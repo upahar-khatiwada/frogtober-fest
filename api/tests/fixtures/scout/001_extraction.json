@@ -1,0 +1,43 @@
+{
+  "title": {"value": "Upgrading and Gravelling of Bhanu-Satiswara Road (3.2 km) including Side Drains and Slab Culverts, Bhanu-6, Tanahun", "quote": "Name of Work: Upgrading and Gravelling of Bhanu-Satiswara Road (3.2 km) including Side Drains and Slab Culverts, Bhanu-6, Tanahun"},
+  "reference_no": {"value": "BM/NCB/W-07/2083-84", "quote": "Contract Identification No.: BM/NCB/W-07/2083-84"},
+  "buyer": {"value": "Bhanu Municipality, Office of the Municipal Executive", "quote": "Bhanu Municipality, Office of the Municipal Executive, invites electronic bids"},
+  "buyer_address": {"value": "भानु, तनहुँ, गण्डकी प्रदेश", "quote": "भानु, तनहुँ, गण्डकी प्रदेश"},
+  "location": {"value": "Bhanu-6, Tanahun", "quote": "Slab Culverts, Bhanu-6, Tanahun"},
+  "scope": {"value": "Gravelling of a 3.2 km road with side drains and four slab culverts.", "quote": "earthwork in road formation, 150 mm gravel sub-base and base course over 3.2 km"},
+  "procurement_type": "works",
+  "procurement_type_quote": "Name of Work",
+  "method": "ncb",
+  "method_quote": "National Competitive Bidding (NCB) procedure",
+  "evaluation_method": null,
+  "evaluation_method_quote": null,
+  "buyer_level": "local",
+  "deadline": {"value": "12:00 hours on 2083-08-05 B.S. (2026-11-21 A.D.)", "quote": "Bids must be submitted electronically through the PPMO e-GP system on or before 12:00 hours on 2083-08-05 B.S. (2026-11-21 A.D.)."},
+  "estimated_cost": {"value": "Rs. 1,48,75,000/-", "quote": "Estimated cost (excluding VAT): Rs. 1,48,75,000/-"},
+  "bid_security": {"value": "Rs. 4,46,000/-", "quote": "Bidders must submit a bid security of Rs. 4,46,000/- in the form of a bank guarantee"},
+  "bid_security_validity": {"value": "valid until 2083-12-15 B.S.", "quote": "valid until 2083-12-15 B.S., or a cash deposit to the municipality's deposit account."},
+  "bid_validity": {"value": "90 days from the bid submission deadline", "quote": "Bid validity: 90 days from the bid submission deadline."},
+  "bid_doc_fee": {"value": "Rs. 3,000/-", "quote": "after paying a non-refundable fee of Rs. 3,000/- to the municipality's revenue account"},
+  "performance_security": null,
+  "min_avg_turnover": {"value": "Rs. 1,50,00,000", "quote": "Average annual construction turnover of the best three years within the last five fiscal years of at least Rs. 1,50,00,000."},
+  "min_similar_contract_value": {"value": "Rs. 60,00,000", "quote": "of value not less than Rs. 60,00,000 in a single contract within the last five fiscal years."},
+  "jv_allowed": true,
+  "jv_quote": "Bidders may form a joint venture of not more than three partners.",
+  "domestic_preference": false,
+  "domestic_preference_quote": null,
+  "required_docs": [
+    {"name": "Valid firm/company registration certificate", "mandatory": true, "source_quote": "Valid firm/company registration certificate and construction licence of Class \"D\" or above, renewed for F/Y 2083/84."},
+    {"name": "construction licence of Class \"D\" or above, renewed for F/Y 2083/84", "mandatory": true, "source_quote": "Valid firm/company registration certificate and construction licence of Class \"D\" or above, renewed for F/Y 2083/84."},
+    {"name": "VAT and PAN registration certificate", "mandatory": true, "source_quote": "VAT and PAN registration certificate."},
+    {"name": "Tax clearance certificate of F/Y 2082/83, or evidence of tax return submission for F/Y 2082/83", "mandatory": true, "source_quote": "Tax clearance certificate of F/Y 2082/83, or evidence of tax return submission for F/Y 2082/83."},
+    {"name": "Self-declaration", "mandatory": true, "source_quote": "Self-declaration that the bidder is not blacklisted and has no conflict of interest."},
+    {"name": "registered JV agreement", "mandatory": false, "source_quote": "A registered JV agreement must be submitted with the bid"},
+    {"name": "payment voucher", "mandatory": true, "source_quote": "must upload the payment voucher with the bid."}
+  ],
+  "requirements": [
+    {"text": "Construction licence class D or above, renewed for FY 2083/84", "mandatory": true, "category": "eligibility", "source_quote": "construction licence of Class \"D\" or above, renewed for F/Y 2083/84."},
+    {"text": "Average annual turnover of best 3 of last 5 years at least NPR 1.5 crore", "mandatory": true, "category": "financial", "source_quote": "Average annual construction turnover of the best three years within the last five fiscal years of at least Rs. 1,50,00,000."},
+    {"text": "At least one similar road contract of NPR 60 lakh or more in the last five years", "mandatory": true, "category": "experience", "source_quote": "Successful completion of at least one similar road work (gravel or blacktop road) of value not less than Rs. 60,00,000 in a single contract within the last five fiscal years."},
+    {"text": "One civil engineer and one sub-engineer", "mandatory": true, "category": "personnel", "source_quote": "Key personnel: one civil engineer and one sub-engineer"}
+  ]
+}

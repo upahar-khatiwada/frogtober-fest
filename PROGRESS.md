@@ -54,6 +54,32 @@
 - Dep added: `beautifulsoup4` (+ `soupsieve`). Audited: pure-Python HTML parser, MIT, no network or model use.
 - **Tests:** `uv run pytest -q` gives **359 passed, 1 deselected** (was 290): `test_seed_tenders.py` (45: labelling, coverage, demo roles vs `profile.json`, ground truth per notice), `test_scraper.py` (17: parsing real markup, keyword filter, politeness with a fake clock, cache reuse, robots disallow / 403 / 5xx / 404, 429 stops without retry, off-host attachment never fetched), and `test_tenders_scrape_api.py` (7, Postgres: seed load offline with a transport that fails on any HTTP, idempotent reload keeps progress, changed text resets, 503, 422, live source via the mock site, blocked reported rather than raised).
 
+### Prompt 5b: Scout agent (2026-10-19) ✅ (offline). Real-model score NOT run
+- Read spec §8.1 (agent contracts) and §8.2 (design rules) this session, from the PDF.
+- **LLM half:** new `schemas/scout.py::TenderExtraction` is what the LLM fills (instead of `TenderRecord`). Every value is a `Grounded {value, quote}` pair of verbatim strings: deadline, cost, bid security and its validity, bid validity, fee, performance security, turnover and similar-contract minimums, location, title, buyer, reference. Required docs are `{name, mandatory, source_quote}` and requirements use `Requirement`. The enum judgments (type, method, buyer level, evaluation, JV, domestic preference) each come with a `*_quote`. The prompt (`agents/scout.py::SYSTEM_PROMPT`) says "copy, do not convert": keep Devanagari digits and units, copy the submission deadline (not publication/opening; the new date in a corrigendum), give one entry per document, and includes a Nepali term glossary. Temperature 0 via `STAGE_TEMPERATURE`.
+- **Code half (`postprocess`, pure):**
+  - `Grounder` checks every raw string and quote is in the notice. It tolerates only whitespace, case, digit script and quote style.
+  - `nepal.parse_deadline` produces the AD datetime + BS ISO. `parse_npr` produces cost, fee and turnover. `parse_percent` / `parse_days` handle security and validity; a validity printed as a date becomes days after the deadline.
+  - `normalize_location` fills district/province (location, then buyer address, then buyer). `classify_document` + `find_fiscal_years` give DocType and FY.
+  - The bid-security due amount comes from `calc_bid_security`. `TenderCriteria` (turnover min + look-back years when one count is stated, similar-contract min) now lives on the record (issue 18). `language` is computed.
+  - If a raw value is not verbatim or does not parse, the value is null, the raw string is kept, a `ReviewFlag` is added and `needs_review` is set. `sources[]` stores value, raw, quote and char span for the UI.
+- **Nepal layer additions:**
+  - `parse_deadline` (BS+AD in one string with a cross-check, Devanagari/danda, BS + English month names, `HH:MM`/`hours`/`PM`/`noon`/`बजे`/`दिनको`; reports issues instead of guessing).
+  - `parse_npr` is now strict on digit grouping and sums descending-unit compounds. Added `parse_percent`, `parse_days`, `has_thousands_marker`.
+  - New `nepal/documents.py`.
+  - Together these close open issue 30.
+- **Schema moves:** `TenderCriteria` and `SecurityCalc` moved to `schemas/tender.py` (re-exported from `nepal.rules` / `nepal`). `TenderRecord` gained the code-owned `criteria`, `bid_security_due`, `sources`, `review_flags` and `needs_review`, all stored in `record_json`, so no migration. `evaluate_rules` defaults `criteria` to `tender.criteria`. `deadline_ad` is now always set by code when the deadline is confirmed.
+- **DB write:** `run_scout(session, client, tender)` / `scout_new_tenders` fill `record_json` + the denormalised columns and set `extracted`, or `failed` on `LLMError` / empty text. The agent_runs row comes from the client callback (`db.make_run_recorder`) and holds the raw LLM extraction.
+- **CLI:** `cd api && uv run python -m agents.scout --seed [--only ..] [--json ..] [--db]` prints a field table (deadline BS/AD, cost, bid security, language, district, doc types, flags).
+- **Golden set:** `data/golden/scout_expected.json` has 15 ids. 5 are hand-labelled (001 mixed, 002 EN crore, 003 AD-only ICB, 005 "in thousands" ambiguity, 012 all-Nepali SQ): deadline BS + AD datetime, cost, required doc types. 10 are `todo`. The labelling rules are in the file. **Scorer:** `scripts/score_scout.py` reports field-level accuracy for deadline (BS, AD to the minute), budget, and docs (P/R/F1 + exact-set). A null label is correct only for null output, and a failed run is wrong on every field. `--manifest` also scores deadline/cost on all 37 seeds; `--predictions` scores saved CLI output.
+- `LLM_NUM_CTX` (default 8192) is passed as Ollama `num_ctx`. The default 2048/4096 window would silently drop the system prompt on long Devanagari notices. Added to `.env.example`.
+- `web/lib/api/types.ts` regenerated (`bun run gen:api`; TenderRecord's new fields).
+- **Tests:** `uv run pytest -q` gives **427 passed, 2 deselected** (was 359).
+  - `test_nepal_scout_parsers.py` (43): deadline formats; never-guess cases; every seed manifest deadline quote parses to its label; compound / mis-grouped amounts; percent/days; doc classification; FY.
+  - `test_scout.py` (25): grounder; language vs all 37 manifest labels; a full 001 record from a hand-written ideal extraction; every source span points at its quote; a converted amount or deadline is not trusted; BS/AD mismatch; corrigendum; 034 garbled grouping; 005 thousands table; 033 percent security + compound cost; ambiguous district; hallucinated text flagged; fake-LLM call (schema, temperature 0, num_ctx, one agent_runs row, strict int rejection → retry → `LLMOutputError`); CLI table; Postgres `run_scout` (row columns, extracted/failed, agent_runs rows, no re-run); golden file vs manifest; scorer arithmetic.
+  - New `-m ollama` smoke test runs Scout on seed 001.
+- **Scorer on the real model: NOT run.** No Ollama on this machine (`curl localhost:11434` refused; issues 12/13). The CLI was run and fails cleanly: both notices show `FAILED /api/chat failed: connection refused`, exit 1. **No accuracy numbers exist yet.** For reference, an ideal (hand-written) extraction of 001 scores 100% on all fields (`test_scorer_on_ideal_extraction_of_001_is_perfect`), so that is the ceiling the code half allows, not a model result.
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -93,14 +119,25 @@
 - **Changed raw text resets a tender** to `new` and drops its matches and compliance items (stale analysis of different text). Proposals are kept as human work.
 - **Seed `source_url`s are `seed://seed_tenders/<file>`.** They are stable and can never collide with a scraped URL.
 - **Demo story vs the demo KB:** every realistic current notice (including 001, the strong match) asks for an **FY 2082/83** tax clearance. The demo KB only has the **expired FY 2081/82** clearance, so 001 will fail `NP-TAX-CLEARANCE` until a fresh clearance is uploaded. 002 is the deliberate *other* hard fail (turnover, experience, class, JV barred), and it fails even with a fresh clearance. See Open issues 29.
+- **The LLM fills `TenderExtraction`, not `TenderRecord` (Prompt 5b).** With raw strings only, the model has no path to put a converted date or amount into a typed field. `TenderRecord` is now entirely code-built.
+- **Grounding is strict.** A raw value counts only if it occurs in the notice after folding whitespace, case, digit script (Devanagari ↔ ASCII) and quote style. A "helpful" conversion by the LLM (e.g. `NPR 14875000` for `Rs. 1,48,75,000/-`) is therefore treated as not verbatim: null + `needs_review`.
+- **`needs_review` does not change status.** The tender is still `extracted`; flags live in `record_json.review_flags`, and there is no DB column (no migration). Matching/Compliance must treat a null deadline/cost as unknown (the rules already return `unclear`).
+- **When a deadline cannot be confirmed, `deadline_bs_raw` is null too.** The raw string stays in `sources` / `review_flags`. Otherwise `nepal.rules._deadline` would re-parse a string Scout had rejected.
+- **An "in thousands" notice:** any amount with no currency marker and no unit word is rejected (table cells). Prose amounts with `रु.` / `Rs` still parse.
+- **"Tax clearance or tax return" is one `tax_clearance` doc.** Rule 40(2)(d) makes them alternatives, and listing both as mandatory would fail compliance wrongly.
+- **Code adds a `bid_security` RequiredDoc** when the bid security was extracted and the LLM did not list it as a document.
+- **Language is computed** from the Devanagari letter share (<0.02 en, >0.92 ne). The thresholds fit all 37 seeds; `[VERIFY]` on real notices.
+- **Golden-set doc labels** use the rules written into `scout_expected.json`: documents to submit or hold; criteria-only evidence (turnover, experience) is excluded unless the notice names the document; non-standard documents count as `other`.
 
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
 - `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
-- §10.2 `POST /tenders/scrape` "enqueue Scout": not done yet (Scout does not exist). It returns a `ScrapeReport` instead of `list[TenderDetail]`.
+- §10.2 `POST /tenders/scrape` "enqueue Scout": not done yet. Scout exists (Prompt 5b) but is not wired to the endpoint. It returns a `ScrapeReport` instead of `list[TenderDetail]`.
+- §8.1 Scout output: the LLM emits `TenderExtraction` (raw strings) and code builds `TenderRecord`. The record is the same contract plus code-owned additive fields (`criteria`, `bid_security_due`, `sources`, `review_flags`, `needs_review`).
+- Prompt 5b asked for the dev CLI as `uv run python -m api.agents.scout --seed`. That module path cannot import: `api/` is a flat app, not a package, and uv must run from `api/`. The working command is `cd api && uv run python -m agents.scout --seed`.
 - §5.1 "one live portal scraper": the source is a municipal notice board, not a national portal. The national portal (bolpatra) blocks non-browser clients. And most live notices are scanned PDFs that yield no text without OCR (out of scope).
 - None in behaviour. Additive fields beyond §8.1/§11: `TenderStatus.failed`, `AgentRunRecord.attempts/error/raw_output` (the `agent_runs` table needs these three columns when migrations land), `ReviewGap.severity`, `ComplianceItem.explanation`. (The spec allowed bge-m3 *or* nomic-embed-text; choosing bge-m3 is a selection within the spec.)
-none known, spec §8.2/§13 not re-read in this session (PDF not available to me)
+(Prompt 3 note, superseded: §8.2 was re-read in Prompt 5b; §13 still not re-read.)
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -115,9 +152,9 @@ none known, spec §8.2/§13 not re-read in this session (PDF not available to me
 9. BS↔AD library choice.
 10. PPMO blacklist URL.
 11. Whether lowest-price acceptance is the general sealed-quotation rule.
-16. Verify spec §8.2 and §13 against api/nepal/ (not read this session).
+16. Verify spec §13 against api/nepal/ (§8.1/§8.2 were read in Prompt 5b and are reflected in Scout).
 17. ~~`nepali-datetime` tests not run~~: run in Prompt 4. All pass after fixing one wrong test assertion. The library range (about 1975-2100 BS) is still its own limit.
-18. `TenderRecord` has no structured turnover/experience criteria; `TenderCriteria` is passed separately. Scout should extract them.
+18. ~~`TenderRecord` has no structured turnover/experience criteria~~: Prompt 5b put `TenderCriteria` on the record, and Scout fills `min_avg_turnover_npr`, `min_similar_value_npr`, and `turnover_years` when exactly one count is stated. Still not extracted: `min_similar_projects` (NP-EXPERIENCE stays `unclear` until it is), and "best 3 of the last 5 years" is left as null years.
 19. `CompanyProfile` has no project history; experience comes from `DocumentMeta` (`similar`, `value_npr`). The `documents` table now holds `doc_type/expires_on/fiscal_year_bs/value_npr`. Still missing: a loader that turns `documents` rows into `DocumentMeta` (which chunk id cites a document? its first chunk?) and the `similar` classification.
 20. Bid-security validity start date (deadline vs. bid-validity end) is an assumption.
 21. Municipalities (753) are not mapped; only district/province.
@@ -145,14 +182,26 @@ New (Prompt 4):
 
 New (Prompt 5a):
 29. **Demo KB vs strong match:** 001 (and 015/016/019/029) will fail `NP-TAX-CLEARANCE` against the demo company's expired FY 2081/82 clearance. Team call: (a) keep it as a demo beat (blocked, upload FY 2082/83 clearance, unblocked), or (b) add a valid FY 2082/83 tax clearance to `data/demo_company/` (manifest + `build_demo_docs.py`) so 001 passes cleanly and the expired one is just history.
-30. **Nepal-layer parsing gaps found by the seed set** (the parsers were not changed in this task): `deadline_from_raw` fails on `"2083-08-05 B.S. (2026-11-21 A.D.)"` (BS+AD in one string), `"…१२ बजे"` (hour without minutes) and `"15/08/2083 by 12 noon"`. Scout must pass only the BS date part, or the normaliser should strip the bracketed AD and bare hours. `parse_npr` rejects compound amounts (`"रु. ३२ लाख ५० हजार"`), and **silently accepts mis-grouped digits** (`"Rs. 1,50,000,00"` → 15,000,000) where it should flag invalid lakh grouping.
+30. ~~Nepal-layer parsing gaps~~: **fixed in Prompt 5b** (`parse_deadline`, strict grouping + compound amounts in `parse_npr`). `deadline_from_raw` itself is unchanged; Scout uses `parse_deadline`. Original note: `deadline_from_raw` fails on `"2083-08-05 B.S. (2026-11-21 A.D.)"` (BS+AD in one string), `"…१२ बजे"` (hour without minutes) and `"15/08/2083 by 12 noon"`. Scout must pass only the BS date part, or the normaliser should strip the bracketed AD and bare hours. `parse_npr` rejects compound amounts (`"रु. ३२ लाख ५० हजार"`), and **silently accepts mis-grouped digits** (`"Rs. 1,50,000,00"` → 15,000,000) where it should flag invalid lakh grouping.
 31. **Live scraper yields little:** both live tender notices on 2026-10-19 were scanned PDFs. Without OCR (out of scope) the live path is a demonstration of polite scraping, not a data source. The robots.txt fetch also saw an intermittent connection reset (the run then fetches nothing).
 32. Kankai's terms of use: no page was found. Re-check before any heavier or scheduled use. APScheduler is not wired to the scraper, and should not be without that check.
 33. Seed notice conventions (e.g. "within 15 days of publication", "in thousands" tables, corrigenda) come from general knowledge of Nepali notices, not a sampled corpus `[VERIFY]` against real notices if the Scout golden set is to be representative.
 34. Docker: the seed volume mount and compose change are not verified (no Docker on this machine, same as issue 24).
 
+New (Prompt 5b):
+35. **Scout has never run against a real model, so there are no accuracy numbers.** First thing once Ollama is up (issues 12/13): `cd api && uv run pytest -m ollama` (does the grammar accept `TenderExtraction`?), then `uv run python -m scripts.score_scout --manifest --out ../data/golden/report.json`, and record the numbers here. Expect the weak spots to be verbatim copying of Devanagari, picking the submission deadline rather than the opening date, and doc lists.
+36. Golden set: 10 of 15 entries are `todo` (004, 006, 007, 008, 011, 015, 021, 027, 033, 034). Their deadline/cost labels already exist in the manifest (`--manifest` scores them); the required-doc labels need a hand pass.
+37. Prompt size: the system prompt is about 1.1k tokens, plus the notice. With `LLM_NUM_CTX=8192` that is fine for seed notices, but long PDF attachments from the live scraper may exceed it. There is no chunking or truncation guard yet.
+38. The `दिनको` + hour 1–5 = PM heuristic and the language thresholds are unverified against real notices (NEPAL_CONTEXT §13 `[VERIFY]`).
+39. `needs_review` has no API or UI surface yet (GET /tenders is still 501). The UI should show `sources[].quote` next to each value and highlight `review_flags`.
+
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
 ## Next prompt
-Prompt 5b: Scout. Wire the DB-backed `run_recorder` (`db.make_run_recorder`, done) into the orchestrator. Build the Scout agent: `LLMClient.chat(stage=SCOUT, schema=TenderRecord)` on `tenders.raw_text` (status `new`), then have `deadline_from_raw` / `parse_npr` overwrite the code-owned fields, then fill the denormalised `tenders` columns and set `extracted` (or `failed`). Add `TenderCriteria` extraction (issue 18). Enqueue Scout from `POST /tenders/scrape` for `new` tenders. Fix or route around the parser gaps in issue 30 first. Build a golden-set check that compares Scout output with `data/seed_tenders/manifest.json` `expected` (deadline, cost, bid security, JV; `null` where the notice is ambiguous). Then write the `documents` -> `DocumentMeta` loader so `nepal.rules.evaluate_rules` runs against the demo company, and decide issue 29. Resolve open issues 12/13 first if possible (a real model is needed to run Scout), then run the seed with real embeddings (issue 23).
+Prompt 6: get a real model running (issues 12/13), then run `pytest -m ollama` and `python -m scripts.score_scout --manifest` and record the Scout numbers in PROGRESS (issue 35). Tune `SYSTEM_PROMPT` only against those misses. Then wire the pipeline:
+- `pipeline/orchestrator.py`: Scout for `new` tenders from `POST /tenders/scrape`, as a background task.
+- Implement `GET /tenders` / `GET /tenders/{id}` (`TenderDetail` with `record.sources` / `review_flags`).
+- Write the `documents` → `DocumentMeta` loader so `evaluate_rules` runs against the demo company, and decide issue 29.
+- Then Matching (`MatchAssessment` → `MatchResult.from_assessment`).
+- Label the 10 `todo` golden entries (issue 36) and run the seed with real embeddings (issue 23).

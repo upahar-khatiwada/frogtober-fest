@@ -533,6 +533,46 @@ export interface components {
          * @enum {string}
          */
         EvaluationMethod: "lowest_evaluated" | "qcbs" | "qbs" | "fixed_budget" | "least_cost" | "other";
+        /**
+         * FieldSource
+         * @description Where one TenderRecord value came from, so the UI can show the value next to its source.
+         */
+        FieldSource: {
+            /**
+             * Field
+             * @description TenderRecord path, e.g. "estimated_cost_npr" or "required_docs[2]".
+             */
+            field: string;
+            /**
+             * Value
+             * @description The stored value (dates as ISO strings).
+             */
+            value?: string | number | boolean | null;
+            /**
+             * Raw
+             * @description Verbatim string the LLM copied from the notice.
+             */
+            raw?: string | null;
+            /**
+             * Quote
+             * @description Verbatim notice text the value is grounded in.
+             */
+            quote?: string | null;
+            /**
+             * Span
+             * @description [start, end) of the quote in tenders.raw_text, if found.
+             */
+            span?: [
+                number,
+                number
+            ] | null;
+            /**
+             * Quote Found
+             * @description The quote (or raw value) occurs in the notice text.
+             * @default false
+             */
+            quote_found: boolean;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -669,6 +709,18 @@ export interface components {
          * @enum {string}
          */
         RequirementCategory: "eligibility" | "financial" | "experience" | "technical" | "personnel" | "equipment" | "other";
+        /**
+         * ReviewFlag
+         * @description A field code could not confirm. The raw string is kept; the value is left null rather than guessed.
+         */
+        ReviewFlag: {
+            /** Field */
+            field: string;
+            /** Reason */
+            reason: string;
+            /** Raw */
+            raw?: string | null;
+        };
         /** ReviewGap */
         ReviewGap: {
             /**
@@ -749,6 +801,20 @@ export interface components {
             max_notices: number;
         };
         /**
+         * SecurityCalc
+         * @description A security amount computed by `nepal.rules` from the notice's own figures.
+         */
+        SecurityCalc: {
+            /** Amount Npr */
+            amount_npr: number | null;
+            /** Valid Until */
+            valid_until?: string | null;
+            /** Valid Until Bs */
+            valid_until_bs?: string | null;
+            /** Basis */
+            basis: string;
+        };
+        /**
          * Severity
          * @enum {string}
          */
@@ -765,6 +831,20 @@ export interface components {
          * @enum {string}
          */
         Stage: "scout" | "matching" | "compliance" | "proposal" | "review";
+        /**
+         * TenderCriteria
+         * @description Numeric qualification criteria from the notice (Scout fills the amounts; counts when written in digits/words).
+         */
+        TenderCriteria: {
+            /** Min Avg Turnover Npr */
+            min_avg_turnover_npr?: number | null;
+            /** Turnover Years */
+            turnover_years?: number | null;
+            /** Min Similar Projects */
+            min_similar_projects?: number | null;
+            /** Min Similar Value Npr */
+            min_similar_value_npr?: number | null;
+        };
         /** TenderDetail */
         TenderDetail: {
             /** Id */
@@ -811,12 +891,12 @@ export interface components {
             language: components["schemas"]["NoticeLanguage"];
             /**
              * Deadline Ad
-             * @description Submission deadline in AD, Nepal Time (UTC+05:45), only if the notice states an AD date.
+             * @description Submission deadline as an aware NPT (UTC+05:45) datetime: the printed AD date, or the BS date converted by lookup table. Set by deterministic code; null when the deadline could not be confirmed.
              */
             deadline_ad?: string | null;
             /**
              * Deadline Bs Raw
-             * @description Submission deadline exactly as written in BS, verbatim.
+             * @description Submission deadline exactly as written (verbatim), when it contains a BS date that parsed cleanly.
              */
             deadline_bs_raw?: string | null;
             /**
@@ -852,6 +932,19 @@ export interface components {
             required_docs?: components["schemas"]["RequiredDoc"][];
             /** Requirements */
             requirements?: components["schemas"]["Requirement"][];
+            criteria?: components["schemas"]["TenderCriteria"];
+            /** @description nepal.rules.calc_bid_security on this record. */
+            bid_security_due?: components["schemas"]["SecurityCalc"] | null;
+            /** Sources */
+            sources?: components["schemas"]["FieldSource"][];
+            /** Review Flags */
+            review_flags?: components["schemas"]["ReviewFlag"][];
+            /**
+             * Needs Review
+             * @description True if any review_flags: a human should check those fields.
+             * @default false
+             */
+            needs_review: boolean;
         };
         /**
          * TenderSource

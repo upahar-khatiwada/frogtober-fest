@@ -18,6 +18,14 @@ _NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 _FOREIGN_RE = re.compile(r"[$€₹]|\b(usd|eur|inr)\b", re.I)
 
 
+# Western (1,234,567) or South Asian (1,23,45,678) digit grouping. Anything else, e.g. the
+# mis-keyed "1,50,000,00", is rejected rather than read as some number (NEPAL_CONTEXT section 9).
+_GROUPING_RE = re.compile(r"^(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3}|\d+)(?:\.\d+)?$")
+_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|per\s*cent\b|percent\b|प्रतिशत)", re.I)
+_DAYS_RE = re.compile(r"(\d+)\s*(?:\(\s*[^)]*\)\s*)?(?:calendar\s+)?(?:days?\b|दिन)", re.I)
+_THOUSANDS_MARKERS = ("in thousand", "in '000", "('000)", "हजारमा")
+
+
 def to_ascii_digits(text: str) -> str:
     return text.translate(_TO_ASCII)
 
@@ -26,24 +34,65 @@ def to_devanagari_digits(text: str) -> str:
     return text.translate(_TO_DEV)
 
 
-def parse_npr(text: str) -> int:
-    """'Rs. 1,25,00,000' / 'NPR 12.5 million' / '१.२५ करोड' -> integer NPR.
+def _number(token: str, source: str) -> Decimal:
+    if not _GROUPING_RE.match(token):
+        raise ValueError(f"invalid digit grouping {token!r} in {source!r}")
+    return Decimal(token.replace(",", ""))
 
-    Strict: exactly one number, no foreign currency, no fractional rupees.
+
+def parse_npr(text: str) -> int:
+    """'Rs. 1,25,00,000' / 'NPR 12.5 million' / '१.२५ करोड' / 'रु. ३२ लाख ५० हजार' -> integer NPR.
+
+    Strict: no foreign currency, no fractional rupees, valid digit grouping only. Several
+    numbers are accepted only as a compound amount where every number carries a unit and the
+    units strictly decrease ('32 lakh 50 thousand'); anything else is ambiguous.
     """
     t = to_ascii_digits(text)
     if _FOREIGN_RE.search(t):
         raise ValueError(f"not an NPR amount: {text!r}")
-    numbers = _NUM_RE.findall(t)
-    if len(numbers) != 1:
-        raise ValueError(f"expected exactly one amount in {text!r}")
-    m = _NUM_RE.search(t)
-    value = Decimal(m.group().replace(",", ""))
-    if unit := _UNIT_RE.match(t, m.end()):
-        value *= _UNITS[unit.group(1).lower()]
+    matches = list(_NUM_RE.finditer(t))
+    if not matches:
+        raise ValueError(f"no amount in {text!r}")
+    parts = []
+    for m in matches:
+        unit = _UNIT_RE.match(t, m.end())
+        parts.append((_number(m.group(), text), _UNITS[unit.group(1).lower()] if unit else None))
+    if len(parts) > 1:
+        units = [u for _, u in parts]
+        if None in units or any(a <= b for a, b in zip(units, units[1:])):
+            raise ValueError(f"expected exactly one amount in {text!r}")
+    value = sum((n * (u or 1) for n, u in parts), Decimal(0))
     if value != value.to_integral_value():
         raise ValueError(f"fractional rupees in {text!r}")
     return int(value)
+
+
+def parse_percent(text: str) -> float:
+    """'2.5%' / '5 percent' / '२.५ प्रतिशत' -> 2.5. Exactly one percentage, 0 < p <= 100."""
+    found = _PERCENT_RE.findall(to_ascii_digits(text))
+    if len(found) != 1:
+        raise ValueError(f"expected exactly one percentage in {text!r}")
+    value = float(found[0])
+    if not 0 < value <= 100:
+        raise ValueError(f"percentage out of range in {text!r}")
+    return value
+
+
+def parse_days(text: str) -> int:
+    """'valid for 148 days' / '१२० दिन' -> 148. Exactly one day count."""
+    found = {int(n) for n in _DAYS_RE.findall(to_ascii_digits(text))}
+    if len(found) != 1:
+        raise ValueError(f"expected exactly one day count in {text!r}")
+    days = found.pop()
+    if days <= 0:
+        raise ValueError(f"non-positive day count in {text!r}")
+    return days
+
+
+def has_thousands_marker(text: str) -> bool:
+    """True if the text says its figures are in thousands ('रु. हजारमा', "in '000")."""
+    t = text.casefold()
+    return any(m in t for m in _THOUSANDS_MARKERS)
 
 
 def format_npr(amount: int) -> str:

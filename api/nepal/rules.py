@@ -18,6 +18,7 @@ from nepal.dates import NPT, ad_to_bs, days_left, fiscal_year_of, parse_bs_datet
 from nepal.numbers import format_npr
 from schemas import CompanyProfile, ComplianceItem, ComplianceStatus, DocType, ProcurementMethod, ProcurementType, RequirementCategory, Severity, TenderRecord
 from schemas._base import Contract, FiscalYearBS
+from schemas.tender import SecurityCalc, TenderCriteria  # noqa: F401  (re-exported: nepal.TenderCriteria)
 
 RULES_PATH = Path(__file__).with_name("rules.yaml")
 P, F, U = ComplianceStatus.PASS, ComplianceStatus.FAIL, ComplianceStatus.UNCLEAR
@@ -50,21 +51,6 @@ class DocumentMeta(Contract):
     fiscal_year_bs: FiscalYearBS | None = None
     value_npr: int | None = Field(None, ge=0, description="Guarantee amount or contract value.")
     similar: bool | None = Field(None, description="Experience certificate similar to this tender? None = not classified.")
-
-
-class TenderCriteria(Contract):
-    """Numeric qualification criteria extracted from the notice. TODO: move into TenderRecord (Scout)."""
-    min_avg_turnover_npr: int | None = Field(None, ge=0)
-    turnover_years: int | None = Field(None, gt=0)
-    min_similar_projects: int | None = Field(None, gt=0)
-    min_similar_value_npr: int | None = Field(None, ge=0)
-
-
-class SecurityCalc(Contract):
-    amount_npr: int | None
-    valid_until: date | None = None
-    valid_until_bs: str | None = None
-    basis: str
 
 
 @lru_cache
@@ -365,7 +351,7 @@ def evaluate_rules(
     now = now or datetime.now(NPT)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    c = Ctx(tender, company, documents, criteria or TenderCriteria(), now, bid_price_npr, _deadline(tender))
+    c = Ctx(tender, company, documents, criteria or tender.criteria, now, bid_price_npr, _deadline(tender))
     items: list[ComplianceItem] = []
     for rule in rules or load_rules():
         if not _applies(rule, tender):

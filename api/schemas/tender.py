@@ -4,9 +4,13 @@ Every value is what the notice says. Nothing is defaulted from
 statutory percentages (NEPAL_CONTEXT.md section 4, "compute nothing").
 Amounts are integer NPR after deterministic lakh/crore/Devanagari
 normalisation (NEPAL_CONTEXT.md section 9).
+
+The LLM does not fill this model. It fills `schemas.scout.TenderExtraction`
+(verbatim raw strings + source quotes), and `agents.scout` builds the
+TenderRecord from that with the deterministic Nepal layer.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import Field, model_validator
 
@@ -52,6 +56,43 @@ class Requirement(Contract):
     source_quote: NonEmptyStr = Field(description="Verbatim text from the notice this requirement came from.")
 
 
+class TenderCriteria(Contract):
+    """Numeric qualification criteria from the notice (Scout fills the amounts; counts when written in digits/words)."""
+
+    min_avg_turnover_npr: int | None = Field(None, ge=0)
+    turnover_years: int | None = Field(None, gt=0)
+    min_similar_projects: int | None = Field(None, gt=0)
+    min_similar_value_npr: int | None = Field(None, ge=0)
+
+
+class SecurityCalc(Contract):
+    """A security amount computed by `nepal.rules` from the notice's own figures."""
+
+    amount_npr: int | None
+    valid_until: date | None = None
+    valid_until_bs: str | None = None
+    basis: str
+
+
+class FieldSource(Contract):
+    """Where one TenderRecord value came from, so the UI can show the value next to its source."""
+
+    field: str = Field(description='TenderRecord path, e.g. "estimated_cost_npr" or "required_docs[2]".')
+    value: str | int | float | bool | None = Field(None, description="The stored value (dates as ISO strings).")
+    raw: str | None = Field(None, description="Verbatim string the LLM copied from the notice.")
+    quote: str | None = Field(None, description="Verbatim notice text the value is grounded in.")
+    span: tuple[int, int] | None = Field(None, description="[start, end) of the quote in tenders.raw_text, if found.")
+    quote_found: bool = Field(False, description="The quote (or raw value) occurs in the notice text.")
+
+
+class ReviewFlag(Contract):
+    """A field code could not confirm. The raw string is kept; the value is left null rather than guessed."""
+
+    field: str
+    reason: str
+    raw: str | None = None
+
+
 class TenderRecord(Contract):
     title: NonEmptyStr
     reference_no: str | None = Field(None, description="IFB / notice number.")
@@ -69,9 +110,13 @@ class TenderRecord(Contract):
     language: NoticeLanguage
 
     deadline_ad: datetime | None = Field(
-        None, description="Submission deadline in AD, Nepal Time (UTC+05:45), only if the notice states an AD date."
+        None,
+        description="Submission deadline as an aware NPT (UTC+05:45) datetime: the printed AD date, or the BS date "
+        "converted by lookup table. Set by deterministic code; null when the deadline could not be confirmed.",
     )
-    deadline_bs_raw: str | None = Field(None, description="Submission deadline exactly as written in BS, verbatim.")
+    deadline_bs_raw: str | None = Field(
+        None, description="Submission deadline exactly as written (verbatim), when it contains a BS date that parsed cleanly."
+    )
     deadline_bs_iso: BSDateISO | None = Field(
         None,
         description="deadline_bs_raw normalised to BS YYYY-MM-DD. Overwritten by deterministic code; never trusted from the LLM.",
@@ -88,3 +133,10 @@ class TenderRecord(Contract):
 
     required_docs: list[RequiredDoc] = Field(default_factory=list)
     requirements: list[Requirement] = Field(default_factory=list)
+
+    # --- code-owned (agents.scout); never from the LLM ---
+    criteria: TenderCriteria = Field(default_factory=TenderCriteria)
+    bid_security_due: SecurityCalc | None = Field(None, description="nepal.rules.calc_bid_security on this record.")
+    sources: list[FieldSource] = Field(default_factory=list)
+    review_flags: list[ReviewFlag] = Field(default_factory=list)
+    needs_review: bool = Field(False, description="True if any review_flags: a human should check those fields.")

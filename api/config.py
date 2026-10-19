@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     embed_model: str = "bge-m3"
     # Per-call HTTP timeout (spec section 10.5). Generous: a 7B model on CPU is slow.
     llm_timeout_s: float = 180.0
+    # Ollama context window per chat call. Ollama's default (2048-4096) silently drops the
+    # start of the prompt (the system prompt) on long Devanagari notices; 0 = Ollama default.
+    llm_num_ctx: int = 8192
 
     # --- Database ---
     database_url: str = "postgresql://tenderly:tenderly@localhost:5432/tenderly"

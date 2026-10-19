@@ -214,7 +214,7 @@ The Pydantic contracts encode these Nepal facts as enums. The JSON schema the LL
 **Field formats:**
 - BS fiscal years are `"YYYY/YY"` with consecutive years (`"2082/83"`), per §7. `"2082-83"` is rejected rather than normalised, so a normaliser must run before validation.
 - `deadline_bs_iso` is a **BS** date `YYYY-MM-DD` with ASCII digits, month 01–12 and day 01–32 (BS months reach 32 days). Deterministic code fills it from `deadline_bs_raw`, and the LLM's value is never trusted. It is not an AD date.
-- `deadline_ad` is an AD datetime, set only when the notice prints an AD date. BS→AD conversion stays deterministic (§7, `[VERIFY]` library).
+- `deadline_ad` is an aware NPT datetime, set by Scout's code (since Prompt 5b): the printed AD date, or the BS date converted with the lookup table. It is null when the deadline could not be confirmed (see §13). BS→AD conversion stays deterministic (§7, `[VERIFY]` library).
 - Amounts are integer NPR (`estimated_cost_npr`, `bid_security.amount_npr`, `bid_doc_fee_npr`), produced by the §9 normaliser. No statutory % is ever used to fill a value (§4).
 - `jv_allowed` is nullable: `null` means the notice is silent, which is different from `false`.
 - PAN/VAT numbers are stored as free strings. No format check is enforced because the format is not in this document. `[VERIFY]`
@@ -237,3 +237,30 @@ The Pydantic contracts encode these Nepal facts as enums. The JSON schema the LL
 | NP-DOMESTIC-PREF | flag only, no percentage applied | Rules 17, 64(4) [VERIFY] | NO | soft |
 
 Assumptions (unverified): security validity counts from the submission deadline; turnover window is the N most recent completed FYs before the deadline's FY; date-only deadlines mean end of day NPT.
+## 13. Scout parsing conventions (as implemented, Prompt 5b)
+
+The Scout LLM copies strings verbatim (`schemas/scout.py::TenderExtraction`). Everything below is deterministic code in `api/nepal/` and `api/agents/scout.py`. When a rule cannot decide, the value is **null**, the raw string is kept, and `needs_review` is set. Nothing is guessed.
+
+**Deadlines (`nepal.dates.parse_deadline`).**
+- Era by year: a year ≥ 2060 is BS, a smaller one is AD (BS ≈ AD + 57, §7). `B.S.` / `A.D.` markers are not needed.
+- Formats read: `YYYY-MM-DD`, `YYYY/MM/DD`, `YYYY.MM.DD`, the danda `YYYY।MM।DD`, `DD/MM/YYYY` (BS), Devanagari digits, BS month names (§7 aliases), and English month names for AD (`December 14, 2026`, `30 November 2026`).
+- A BS date and an AD date in one string must agree through the lookup table. If they don't, it is an issue (`deadline` null).
+- An AD `DD/MM/YYYY` with both parts ≤ 12 is an issue (day/month order unknown).
+- Two different dates of one era (e.g. a corrigendum's old and new date) are an issue. Two different times of day (e.g. submission and opening) are also an issue.
+- Times: `12:00`, `12:00 hours`, `2 PM`, `12 noon`, `मध्यान्ह`, `१२ बजे`. Nepali day-part words make a time PM: `दिउँसो`, `बेलुका`, `साँझ`, and `दिनको` before an hour of 1–5 (so `दिनको २:०० बजे` = 14:00). `[VERIFY]` that heuristic against real notices; seed notices only use it for opening times. A date with no time is 23:59:59 NPT (decision in PROGRESS.md).
+
+**Amounts (`nepal.numbers.parse_npr`).**
+- Digit grouping must be valid Western (`1,234,567`) or South Asian (`1,23,45,678`). A mis-keyed figure such as `1,50,000,00` is rejected, never read as some number.
+- Compound amounts are summed only when every number has a unit and the units strictly decrease (`रु. ३२ लाख ५० हजार` = 3,250,000).
+- If the notice says some figures are "in thousands" (`रु. हजारमा`, `in '000`), Scout rejects any amount that has neither a currency marker nor a unit word. That covers table cells, whose scale is unknown.
+
+**Percent and days.** `parse_percent` and `parse_days` accept exactly one number (`२.५ प्रतिशत`, `120 दिन`, `90 (ninety) days`). A bid-security validity printed as a date ("valid until 2083-12-15 B.S.") becomes days after the submission deadline. This matches `calc_bid_security`, which counts validity from the deadline (an assumption, §4).
+
+**Documents (`nepal.documents`).**
+- An English + Nepali keyword table maps each document name to `DocType`s (§3, §11): कर चुक्ता → tax_clearance, कर विवरण → tax_return, मू.अ.कर / स्थायी लेखा नम्बर → pan_vat, नवीकरण → licence_renewal, इजाजतपत्र → business_licence, फर्म दर्ता → company_registration, स्वघोषणा → self_declaration, अख्तियारनामा → power_of_attorney, धरौटी / बोलपत्र जमानत → bid_security, लेखापरीक्षण → audit_report, अनुभव → experience_certificate, संयुक्त उपक्रम सम्झौता → jv_agreement.
+- One line can yield several types. Each keyword match consumes its text, so "VAT and PAN registration certificate" is not also company_registration.
+- "Tax clearance or tax return" is kept as tax_clearance only. Rule 40(2)(d) treats them as alternatives, and `NP-TAX-CLEARANCE` accepts either.
+- Fiscal years are read as `2082/83`, `2082-83`, `2082/2083` or `082/83` and must be consecutive. They are attached to tax clearance, tax return, licence renewal and audit report.
+- An unrecognised name becomes `other`.
+
+**Language** is computed, not asked of the LLM. Let *share* be the fraction of letters that are Devanagari. Below 0.02 the notice is `en`, above 0.92 it is `ne`, otherwise `mixed`. These thresholds fit all 37 seed notices. `[VERIFY]` them on real notices.

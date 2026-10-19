@@ -2,7 +2,7 @@
 
 These are the contract between stages: code routes, filters, blocks and
 gates on them. Models the LLM fills (passed as `schema=` to
-`pipeline.llm.LLMClient.chat`): TenderRecord, MatchAssessment,
+`pipeline.llm.LLMClient.chat`): TenderExtraction, MatchAssessment,
 ComplianceAssessment, ProposalSection, ReviewReport. The rest are built
 by code or entered by the user.
 """
@@ -33,10 +33,19 @@ from schemas.match import MatchAssessment, MatchResult
 from schemas.proposal import Proposal, ProposalSection
 from schemas.review import ReviewGap, ReviewReport, ReviewScores
 from schemas.runs import AgentRun, AgentRunRecord
-from schemas.tender import BidSecurity, RequiredDoc, Requirement, TenderRecord
+from schemas.scout import ExtractedDoc, Grounded, TenderExtraction
+from schemas.tender import (BidSecurity, FieldSource, RequiredDoc, Requirement, ReviewFlag, SecurityCalc, TenderCriteria,
+                            TenderRecord)
 from schemas.views import CompanyDocumentView, CompanyView, ScrapeReport, ScrapeRequest, SkippedNotice, TenderDetail
 
 __all__ = [
+    "TenderExtraction",
+    "TenderCriteria",
+    "SecurityCalc",
+    "ReviewFlag",
+    "Grounded",
+    "FieldSource",
+    "ExtractedDoc",
     "AgentRun",
     "AgentRunRecord",
     "AnnualTurnover",

@@ -125,6 +125,161 @@ def deadline_from_raw(raw: str) -> tuple[str, datetime]:
     return parse_bs_date(raw).iso(), parse_bs_datetime(raw)
 
 
+# --- deadline strings as notices print them -----------------------------------------
+# BS and AD years never overlap in practice (BS = AD + ~57), so the year decides the era.
+BS_MIN_YEAR = 2060
+
+MONTHS_AD = ["january", "february", "march", "april", "may", "june", "july", "august", "september",
+             "october", "november", "december"]
+_AD_MONTHS = {m: i for i, m in enumerate(MONTHS_AD, 1)} | {m[:3]: i for i, m in enumerate(MONTHS_AD, 1)} | {"sept": 9}
+
+_DSEP = r"\s*[-/.।]\s*"
+_YMD = re.compile(rf"(?<!\d)(\d{{4}}){_DSEP}(\d{{1,2}}){_DSEP}(\d{{1,2}})(?![\d:])")
+_DMY = re.compile(rf"(?<![\d:])(\d{{1,2}}){_DSEP}(\d{{1,2}}){_DSEP}(\d{{4}})(?!\d)")
+_MONTH_ALT = "|".join(sorted({*map(re.escape, _MONTHS), *_AD_MONTHS}, key=len, reverse=True))
+_DAY_MONTH_YEAR = re.compile(rf"(?<!\d)(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_ALT})\.?,?\s+(\d{{4}})(?!\d)", re.I)
+_MONTH_DAY_YEAR = re.compile(rf"(?<![\wऀ-ॿ])({_MONTH_ALT})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})(?!\d)", re.I)
+
+_CLOCK = re.compile(r"(?<![\d:])(\d{1,2})\s*:\s*(\d{2})(?!\d)\s*(a\.?m\.?|p\.?m\.?)?", re.I)
+_HOUR_AMPM = re.compile(r"(?<![\d:])(\d{1,2})\s*(a\.?m\.?|p\.?m\.?)(?![a-z])", re.I)
+_HOUR_BAJE = re.compile(r"(?<![\d:])(\d{1,2})\s*बजे")
+_NOON = re.compile(r"\bnoon\b|मध्यान्ह", re.I)
+# Nepali day-part words before a clock time: "दिनको २:०० बजे" is 2 pm, "बेलुका ५ बजे" is 5 pm.
+_PM_WORDS = ("दिउँसो", "बेलुका", "साँझ", "बेलुकी")
+_DAY_WORD = "दिनको"
+
+
+class DeadlineParse(NamedTuple):
+    """What a deadline string says, read deterministically. `deadline` is None if `issues`."""
+
+    bs: BSDate | None
+    ad: date | None
+    time_of_day: time | None
+    deadline: datetime | None
+    issues: tuple[str, ...]
+
+
+def _era_date(y: int, m: int, d: int, issues: list[str]) -> tuple[str, date | BSDate] | None:
+    try:
+        if y >= BS_MIN_YEAR:
+            return "bs", _validate(y, m, d)
+        return "ad", date(y, m, d)
+    except ValueError as exc:
+        issues.append(str(exc))
+        return None
+
+
+def _find_dates(t: str, issues: list[str]) -> tuple[list[BSDate], list[date], str]:
+    """All dates in `t` (ASCII digits); returns BS dates, AD dates and `t` with them blanked out."""
+    found: list[tuple[str, date | BSDate]] = []
+
+    def take(m: re.Match, y: int, mo: int, d: int) -> str:
+        if (hit := _era_date(y, mo, d, issues)) is not None:
+            found.append(hit)
+        return " " * len(m.group())
+
+    def month_number(name: str, y: int) -> int | None:
+        key = unicodedata.normalize("NFC", name).casefold().rstrip(".")
+        bs_month, ad_month = _MONTHS.get(key), _AD_MONTHS.get(key)
+        return bs_month if y >= BS_MIN_YEAR else ad_month
+
+    def named(m: re.Match, day_first: bool) -> str:
+        day, name = (m[1], m[2]) if day_first else (m[2], m[1])
+        y = int(m[3])
+        mo = month_number(name, y)
+        if mo is None:
+            issues.append(f"month {name!r} does not fit a {'BS' if y >= BS_MIN_YEAR else 'AD'} year in {m.group()!r}")
+            return " " * len(m.group())
+        return take(m, y, mo, int(day))
+
+    t = _DAY_MONTH_YEAR.sub(lambda m: named(m, True), t)
+    t = _MONTH_DAY_YEAR.sub(lambda m: named(m, False), t)
+    t = _YMD.sub(lambda m: take(m, int(m[1]), int(m[2]), int(m[3])), t)
+
+    def dmy(m: re.Match) -> str:
+        d, mo, y = int(m[1]), int(m[2]), int(m[3])
+        if y < BS_MIN_YEAR and d <= 12 and mo <= 12 and d != mo:
+            issues.append(f"AD date {m.group()!r} could be day/month or month/day")
+            return " " * len(m.group())
+        return take(m, y, mo, d)
+
+    t = _DMY.sub(dmy, t)
+    bs = list(dict.fromkeys(v for era, v in found if era == "bs"))
+    ad = list(dict.fromkeys(v for era, v in found if era == "ad"))
+    return bs, ad, t
+
+
+def _find_time(t: str, issues: list[str]) -> time | None:
+    times: list[time] = []
+
+    def pm_context(start: int) -> tuple[bool, bool]:
+        before = t[max(0, start - 12):start]
+        return any(w in before for w in _PM_WORDS), _DAY_WORD in before
+
+    for m in _CLOCK.finditer(t):
+        h, mi, ap = int(m[1]), int(m[2]), (m[3] or "").lower().replace(".", "")
+        pm_word, day_word = pm_context(m.start())
+        if ap == "pm" or pm_word or (day_word and 1 <= h <= 5):
+            h = h + 12 if h < 12 else h
+        elif ap == "am" and h == 12:
+            h = 0
+        if h > 23 or mi > 59:
+            issues.append(f"invalid time {m.group()!r}")
+            continue
+        times.append(time(h, mi))
+    rest = _CLOCK.sub(" ", t)
+    for m in _HOUR_AMPM.finditer(rest):
+        h, ap = int(m[1]), m[2].lower().replace(".", "")
+        times.append(time((h % 12) + (12 if ap == "pm" else 0), 0))
+    rest = _HOUR_AMPM.sub(" ", rest)
+    for m in _HOUR_BAJE.finditer(rest):
+        h = int(m[1])
+        pm_word, day_word = pm_context(m.start())
+        if (pm_word or (day_word and 1 <= h <= 5)) and h < 12:
+            h += 12
+        if h > 23:
+            issues.append(f"invalid time {m.group()!r}")
+            continue
+        times.append(time(h, 0))
+    if _NOON.search(t) and not times:
+        times.append(time(12, 0))
+    distinct = list(dict.fromkeys(times))
+    if len(distinct) > 1:
+        issues.append(f"several times of day: {', '.join(x.strftime('%H:%M') for x in distinct)}")
+        return None
+    return distinct[0] if distinct else None
+
+
+def parse_deadline(raw: str) -> DeadlineParse:
+    """Read a submission deadline as a notice prints it. Never guesses.
+
+    Handles BS and AD in one string ('2083-08-05 B.S. (2026-11-21 A.D.)'), Devanagari digits
+    and the danda separator, BS and English month names, and times as '12:00 hours',
+    '12 noon', '2 PM' or '१२ बजे'. A date-only deadline is end of day NPT. Any of these is an
+    issue and leaves `deadline` None: no date, two different dates of one era, a BS date
+    that does not convert to the printed AD date, an invalid date, or two different times.
+    """
+    issues: list[str] = []
+    t = to_ascii_digits(unicodedata.normalize("NFC", raw))
+    bs_dates, ad_dates, rest = _find_dates(t, issues)
+    tod = _find_time(rest, issues)
+    if len(bs_dates) > 1:
+        issues.append(f"several BS dates: {', '.join(d.iso() for d in bs_dates)}")
+    if len(ad_dates) > 1:
+        issues.append(f"several AD dates: {', '.join(d.isoformat() for d in ad_dates)}")
+    bs = bs_dates[0] if len(bs_dates) == 1 else None
+    ad = ad_dates[0] if len(ad_dates) == 1 else None
+    if bs and ad and bs_to_ad(bs) != ad:
+        issues.append(f"BS {bs.iso()} is AD {bs_to_ad(bs).isoformat()}, but the text says AD {ad.isoformat()}")
+    if not bs_dates and not ad_dates and not issues:
+        issues.append(f"no date found in {raw!r}")
+    if issues:
+        return DeadlineParse(bs, ad, tod, None, tuple(issues))
+    day = ad or bs_to_ad(bs)
+    bs = bs or ad_to_bs(day)
+    return DeadlineParse(bs, day, tod, datetime.combine(day, tod or END_OF_DAY, tzinfo=NPT), ())
+
+
 def days_in_bs_month(year: int, month: int) -> int:
     a = nd.date(year, month, 1).to_datetime_date()
     b = nd.date(year + (month == 12), month % 12 + 1, 1).to_datetime_date()

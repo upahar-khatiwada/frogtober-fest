@@ -222,6 +222,8 @@ class LLMClient:
             "stream": False,
             "options": {"temperature": temperature},
         }
+        if self.settings.llm_num_ctx:
+            body["options"]["num_ctx"] = self.settings.llm_num_ctx
         data = self._post("/api/chat", body)
         try:
             content = data["message"]["content"]
