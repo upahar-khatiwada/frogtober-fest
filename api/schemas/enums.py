@@ -131,6 +131,27 @@ class TenderStatus(StrEnum):
     FAILED = "failed"  # a stage's LLM output was invalid after one retry
 
 
+class RunStatus(StrEnum):
+    """A pipeline run (`pipeline_runs`, GET /runs): one orchestrated pass over one tender."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"  # reached its target status
+    STOPPED = "stopped"  # ended on a branch (skipped / blocked): a normal outcome, not an error
+    FAILED = "failed"  # a stage failed, crashed, or the worker was interrupted
+
+
+class StageStatus(StrEnum):
+    """One stage inside a pipeline run (`pipeline_runs.stages[]`). JSONB only, so no CHECK constraint."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    OK = "ok"
+    BRANCHED = "branched"  # the stage ran and took the skipped/blocked branch
+    FAILED = "failed"
+    NOT_RUN = "not_run"  # an earlier stage branched or failed, or the run was interrupted first
+
+
 class ProposalStatus(StrEnum):
     DRAFT = "draft"
     REVIEWED = "reviewed"

@@ -1,7 +1,7 @@
 """Tender endpoints (spec section 10.2).
 
 Implemented: POST /tenders/scrape, GET /tenders (ranked, filtered), GET /tenders/{id} (with the
-compliance section), POST /tenders/{id}/analyze (Matching, then Compliance if pursued) and
+compliance section), POST /tenders/{id}/analyze (202: a background pipeline run, polled via GET /runs/{id}) and
 POST /tenders/{id}/compliance/override. The proposal route enforces the compliance gate (409 while
 blocked) and is otherwise still a 501 stub that declares its response model for the OpenAPI schema.
 """
@@ -11,14 +11,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, TypeVar
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from agents.compliance import compliance_view, override_block, proposal_allowed
 from config import Settings
 from db.models import ComplianceItemRow, Match, Tender
-from deps import get_kankai_fetcher, get_llm_client, get_now, get_seed_dir, get_session, get_settings
+from deps import get_kankai_fetcher, get_llm_client, get_now, get_seed_dir, get_session, get_sessionmaker, get_settings
 from ingest.notices import upsert_notices
 from ingest.scraper import PoliteFetcher, scrape_kankai
 from ingest.seed_tenders import SeedDataError, load_seed_notices
@@ -26,7 +26,8 @@ from nepal.dates import NPT, ad_to_bs, days_left, format_bs
 from nepal.geography import normalize_location
 from pipeline import orchestrator
 from pipeline.llm import LLMClient
-from schemas import (BuyerLevel, ComplianceOverrideRequest, DeadlineView, MatchDecision, MatchResult, NoticeLanguage, ProcurementMethod, ProcurementType,
+from routers.runs import run_view
+from schemas import (AnalyzeRequest, BuyerLevel, ComplianceOverrideRequest, DeadlineView, MatchDecision, MatchResult, NoticeLanguage, PipelineRunView, ProcurementMethod, ProcurementType,
                      Proposal, Province, ScrapeReport, ScrapeRequest, SkippedNotice, TenderDetail, TenderListItem,
                      TenderRecord, TenderSource, TenderStatus)
 
@@ -202,31 +203,39 @@ def get_tender(
 
 @router.post(
     "/{tender_id}/analyze",
+    status_code=status.HTTP_202_ACCEPTED,
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "No such tender"},
-        status.HTTP_409_CONFLICT: {"description": "Not extracted yet, already past Compliance, or no company profile"},
+        status.HTTP_409_CONFLICT: {"description": "Already running, nothing to do for this status/target, or no company profile"},
     },
 )
 def analyze_tender(
     tender_id: int,
+    background: BackgroundTasks,
     session: Annotated[Session, Depends(get_session)],
+    factory: Annotated[sessionmaker[Session], Depends(get_sessionmaker)],
     client: Annotated[LLMClient, Depends(get_llm_client)],
     settings: Annotated[Settings, Depends(get_settings)],
     now: Annotated[datetime, Depends(get_now)],
-) -> TenderDetail:
-    """Run Matching, then Compliance if pursued: status becomes skipped, checked or blocked.
+    body: Annotated[AnalyzeRequest | None, Body()] = None,
+) -> PipelineRunView:
+    """Start a pipeline run in the background (Scout if still new, Matching, then Compliance if pursued) and return it.
 
-    A model failure returns the tender with status `failed`. Re-running on a checked/blocked tender (e.g. after
-    uploading a renewed document) re-checks it; an earlier override still holds only if it covers every new hard failure.
+    Poll GET /runs/{id} for stage statuses; the tender ends checked, skipped, blocked or failed. A failed tender
+    resumes from its last good state. Re-running a checked/blocked/skipped tender (e.g. after uploading a renewed
+    document) re-matches and re-checks it; an earlier override still holds only if it covers every new hard failure.
     """
+    body = body or AnalyzeRequest()
     tender = session.get(Tender, tender_id)
     if tender is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No tender {tender_id}")
+    runners = orchestrator.default_runners(settings, now)
     try:
-        orchestrator.analyze_tender(session, client, tender, settings=settings, now=now)
+        run = orchestrator.start_run(session, tender, target=body.target, from_stage=body.from_stage, runners=runners)
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    return _detail(session, tender, _match_of(session, tender_id), now)
+    background.add_task(orchestrator.execute_run, factory, client, run.id, settings=settings, now=now, runners=runners)
+    return run_view(run, tender.title)
 
 
 @router.post(

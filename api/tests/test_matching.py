@@ -345,19 +345,25 @@ def test_match_extracted_tenders_only_touches_extracted(db_session, make_client)
     assert list(out) == [a.id] and b.status == "new"
 
 
-def test_skipped_tender_does_not_reach_compliance(db_session, make_client):
-    from pipeline.orchestrator import analyze_tender
+def test_skipped_tender_does_not_reach_compliance(session_factory, db_session, make_client):
+    from pipeline.orchestrator import run_pipeline
+    from schemas import Stage
 
     seed_company(db_session)
     skipped = add_tender(db_session, record(procurement_type="goods"), url="seed://s")
     pursued = add_tender(db_session, record(), url="seed://p")
     calls = []
+
+    def compliance(session, client, tender):
+        calls.append(tender.id)
+        tender.status = "checked"
+        session.commit()
+
     client = make_client(FakeOllama([assessment_json(90)], embed_fn=bag_of_words_vector), [])
-    for t in (skipped, pursued):
-        analyze_tender(db_session, client, t, compliance=lambda s, c, tender: calls.append(tender.id),
-                       settings=settings_(), now=NOW)
+    ends = [run_pipeline(session_factory, client, t.id, runners={Stage.COMPLIANCE: compliance},
+                         settings=settings_(), now=NOW).end_status for t in (skipped, pursued)]
     assert calls == [pursued.id]
-    assert (skipped.status, pursued.status) == ("skipped", "matched")
+    assert ends == ["skipped", "checked"]
 
 
 # --- metric script ----------------------------------------------------------------------------

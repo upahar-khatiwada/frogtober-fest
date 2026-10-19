@@ -352,29 +352,28 @@ def test_run_compliance_refuses_other_statuses(db_session, make_client, status):
         run_compliance(db_session, make_client(FakeOllama([]), []), tender, now=NOW)
 
 
-def test_analyze_runs_matching_then_compliance(pg_url, db_session, make_client):
-    from pipeline.orchestrator import analyze_tender
+def test_analyze_runs_matching_then_compliance(pg_url, session_factory, db_session, make_client):
+    from pipeline.orchestrator import run_pipeline
 
     seed_demo(pg_url, make_client)
     tender = demo_tender(db_session, status="extracted")
     replies = ([assessment_json(85)] + [unclear_json()] * 3) * 2  # Matching, then 3 Compliance model calls; twice
     client = make_client(FakeOllama(replies, embed_fn=bag_of_words_vector), [])
-    analyze_tender(db_session, client, tender, now=NOW)
-    assert tender.status == "blocked"
-    analyze_tender(db_session, client, tender, now=NOW)  # re-analysis from blocked is allowed
-    assert tender.status == "blocked"
+    assert run_pipeline(session_factory, client, tender.id, now=NOW).end_status == "blocked"
+    run = run_pipeline(session_factory, client, tender.id, now=NOW)  # re-analysis from blocked is allowed
+    assert run.end_status == "blocked" and [s["stage"] for s in run.stages] == ["matching", "compliance"]
 
 
-def test_analyze_drops_stale_items_when_no_longer_pursued(pg_url, db_session, make_client):
-    from pipeline.orchestrator import analyze_tender
+def test_analyze_drops_stale_items_when_no_longer_pursued(pg_url, session_factory, db_session, make_client):
+    from pipeline.orchestrator import run_pipeline
 
     seed_demo(pg_url, make_client)
     tender = demo_tender(db_session, status="extracted")
     client = make_client(FakeOllama([assessment_json(85)] + [unclear_json()] * 3, embed_fn=bag_of_words_vector), [])
-    analyze_tender(db_session, client, tender, now=NOW)
+    run_pipeline(session_factory, client, tender.id, now=NOW)
     assert load_report(db_session, tender.id) is not None
-    analyze_tender(db_session, client, tender, now=NOW + timedelta(days=60))  # deadline passed -> hard skip
-    assert tender.status == "skipped" and load_report(db_session, tender.id) is None
+    run = run_pipeline(session_factory, client, tender.id, now=NOW + timedelta(days=60))  # deadline passed -> hard skip
+    assert run.end_status == "skipped" and load_report(db_session, tender.id) is None
 
 
 # --- golden file + metric --------------------------------------------------------------------------------------

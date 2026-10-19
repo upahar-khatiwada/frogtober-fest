@@ -19,8 +19,10 @@ def blocked_001(api, db_session, pg_url, make_client):  # noqa: F811
     tender = demo_tender(db_session, status="extracted")
     api.holder["llm"] = llm([assessment_json(85)] + [unclear_json()] * 3)
     resp = api.post(f"/tenders/{tender.id}/analyze")
-    assert resp.status_code == 200, resp.text
-    return tender, resp.json()
+    assert resp.status_code == 202, resp.text
+    run = api.get(f"/runs/{resp.json()['id']}").json()
+    assert run["status"] == "stopped" and run["end_status"] == "blocked", run
+    return tender, api.get(f"/tenders/{tender.id}").json()
 
 
 def test_analyze_then_detail_shows_compliance(api, db_session, pg_url, make_client):  # noqa: F811

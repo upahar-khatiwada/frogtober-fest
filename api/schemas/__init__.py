@@ -26,16 +26,18 @@ from schemas.enums import (
     Province,
     RequirementCategory,
     ReviewVerdict,
+    RunStatus,
     Severity,
     SignalSource,
     Stage,
+    StageStatus,
     TenderSource,
     TenderStatus,
 )
 from schemas.match import MatchAssessment, MatchResult, MatchSignal
 from schemas.proposal import Proposal, ProposalSection
 from schemas.review import ReviewGap, ReviewReport, ReviewScores
-from schemas.runs import AgentRun, AgentRunRecord
+from schemas.runs import AgentRun, AgentRunRecord, AnalyzeRequest, PipelineRunDetail, PipelineRunView, StageRun
 from schemas.scout import ExtractedDoc, Grounded, TenderExtraction
 from schemas.tender import (BidSecurity, FieldSource, RequiredDoc, Requirement, ReviewFlag, SecurityCalc, TenderCriteria,
                             TenderRecord)
@@ -52,6 +54,12 @@ __all__ = [
     "ExtractedDoc",
     "AgentRun",
     "AgentRunRecord",
+    "AnalyzeRequest",
+    "PipelineRunDetail",
+    "PipelineRunView",
+    "RunStatus",
+    "StageRun",
+    "StageStatus",
     "AnnualTurnover",
     "BidSecurity",
     "BuyerLevel",

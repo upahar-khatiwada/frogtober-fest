@@ -144,6 +144,64 @@
   - New `-m ollama` smoke test for Compliance on 001 (not run).
 - **Not run:** `score_compliance --llm` and the smoke test. There is still no Ollama on this machine (`curl localhost:11434` refused).
 
+### Prompt 8: orchestrator state machine, pipeline runs, background analyze, pre-cache (2026-10-19) ✅ (offline)
+- Read spec §10.3, §10.5 and §12 (Day 6) this session, from the PDF.
+- **`pipeline/orchestrator.py`** (rewritten):
+  - `TRANSITIONS` is the legal edge table. `HUMAN_TRANSITIONS` = override (blocked→checked) and approval (reviewed→approved).
+  - `STEPS`: Scout new→extracted, Matching extracted→matched|skipped, Compliance matched→checked|blocked, Proposal checked→drafted, Review drafted→reviewed.
+  - Runners default to `run_scout` / `run_matching(rematch=True)` (+ dropping stale compliance items when not pursued) / `run_compliance`. Proposal and Review are `None` until those agents exist; they are tested with injected runners.
+  - **Resume:** `resume_status` derives a failed tender's last good state from stored data (no record → new; no match row → extracted; pursued match → matched), because every failing stage drops its own partial output. This works whatever started the stage (API or CLI).
+  - **Planning:** `plan_run` continues forward. It re-runs from Matching for skipped/blocked/checked tenders or when the target is already reached (re-analysis after uploading a document). `from_stage` rewinds. It refuses with ValueError → 409: drafted+ without `from_stage`, target `approved` (human), stages with no runner, no company, or a `from_stage` the tender has not reached.
+  - **Execution:** `start_run` stores a `queued` `pipeline_runs` row. `execute_run` is the background task:
+    - Stage bookkeeping (status, timestamps, `duration_ms`, heartbeat) is written in its own short sessions, so it never commits half-done tender work.
+    - After each runner, the tender's status must be a legal edge from the step's start, or the run fails ("illegal transition").
+    - A raising stage is rolled back, the tender set `failed`, and an `agent_runs` row written (`model="orchestrator"`).
+    - The run ends `succeeded` / `stopped` (branch) / `failed`. Untaken stages become `not_run`, and the run is never left `running` by a live worker.
+  - `run_pipeline` is the synchronous wrapper (scripts, tests). The old `analyze_tender` is gone.
+- **Linking agent_runs:** `db.runs.current_pipeline_run` (a ContextVar) plus a `before_insert` hook stamp `pipeline_run_id` on every agent_runs row written during a run. That includes the agents' own code-only rows, with no agent changes. The recorder bumps the run's heartbeat on every model call.
+- **Stuck runs:** `reap_stale_runs` runs at startup (FastAPI lifespan; reaps every queued/running run, since background tasks die with the process) and on every `GET /runs*` (heartbeat older than `PIPELINE_STALE_AFTER_S`, default 600). Tender statuses are only ever committed as resting values, so a reaped run's tender sits at its last good state. The lifespan logs and carries on if the DB is unreachable.
+- **DB (migration `0003`):**
+  - `pipeline_runs`: target, status with CHECK `RunStatus`, start/resumed_from/end status, `stages` JSONB of `StageRun`, error, created/started/finished/heartbeat timestamps.
+  - **Partial unique index** `uq_pipeline_runs_active_tender` allows one queued/running run per tender.
+  - `agent_runs` gains `pipeline_run_id` (FK SET NULL) and `cached`.
+- **API:**
+  - `POST /tenders/{id}/analyze` now returns **202 + `PipelineRunView`** and runs in a FastAPI `BackgroundTasks` (no queue). It takes an optional body `AnalyzeRequest {target (default checked), from_stage}`. A `new` tender is accepted (Scout runs first).
+  - New `GET /runs` (newest first; filters `tender_id`, `status`, `limit`/`offset`).
+  - `GET /runs/{id}` returns `PipelineRunDetail`: stages with from/to status, timestamps and `duration_ms`, plus the run's agent_runs rows.
+  - New schemas: `RunStatus`, `StageStatus`, `StageRun`, `AnalyzeRequest`, `PipelineRunView`, `PipelineRunDetail`. `AgentRun` gains `pipeline_run_id` and `cached`. `web/lib/api/types.ts` regenerated; `bunx tsc --noEmit` is clean.
+- **Failure handling (spec §10.5):**
+  - Per-call timeout (`LLM_TIMEOUT_S`) and one schema retry stay in `LLMClient`.
+  - A failed stage's run carries the error of its failed agent_runs row (e.g. `compliance: attempt 2: ... validation error`).
+- **Pre-cache:**
+  - `pipeline.llm.ReplayCache` is a JSON file of validated chat outputs keyed by the client's request hash (model + stage + messages + schema + temperature), plus embeddings keyed by (model, text).
+  - A hit is re-validated strictly and still writes its agent_runs row, marked `cached`. A stale or invalid entry, or a miss, goes to the live model.
+  - `LLM_REPLAY_CACHE` turns it on for every client (read-only). docker-compose points it at `data/demo_cache/llm_cache.json` (mounted read-only); nothing happens until the file exists.
+  - `scripts/precache_demo.py` runs Scout→Matching→Compliance (`from_stage=scout`) on seeds 001/002/003 with a recording client (`--seed-company` also caches the KB embeddings). It prints a status table.
+  - `--check` replays with a transport that refuses all HTTP and exits 1 on any miss.
+- **Tests:** `uv run pytest -q` gives **603 passed, 4 deselected** (was 552).
+  - `test_orchestrator.py` (38):
+    - the transition table (+10 illegal pairs);
+    - new→reviewed through all five stages, with one agent_runs row per transition linked to the run;
+    - each single transition;
+    - the skipped branch (Compliance never called);
+    - the blocked branch (Proposal never called);
+    - **real agents on raw notice 001: new→extracted→matched→blocked**;
+    - failure at Scout/Matching/Compliance;
+    - real Scout invalid twice (exactly one retry);
+    - a crashing stage (rolled back, tender failed, orchestrator row);
+    - illegal transitions;
+    - `resume_status` derivation;
+    - **resume after a Compliance failure skips Matching**, and resume after a Scout failure;
+    - re-analysis planning, `from_stage` rewind and refusals, no company;
+    - one active run (incl. the DB index);
+    - the worker ignores non-queued runs;
+    - the reaper (stale vs fresh, startup).
+  - `test_runs_api.py` (5): 202 → poll, failed then resumed via the API, list order/filters/paging/422, 404/409, polling reaps a dead run.
+  - `test_llm.py` +6 (record/replay with no HTTP, miss, invalid entry ignored, keyed by model, embeddings fetch only missing texts, setting pickup).
+  - `test_precache.py` (2): record then `--check` offline with every model row `cached`, and a removed entry makes `--check` fail.
+  - Updated: the analyze tests in `test_tenders_list_api.py`, `test_compliance_api.py`, `test_compliance.py` and `test_matching.py` (202 + poll, `run_pipeline`; `new` is no longer 409).
+- **Not run:** a real recording of `data/demo_cache/llm_cache.json` (no Ollama here), and Docker (no Docker here).
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -212,6 +270,13 @@
 - **Re-analysis is allowed from checked/blocked** (upload a renewed document, then analyze again). `run_matching` alone still refuses those statuses; only the orchestrator passes `rematch=True`, and it always re-runs Compliance.
 - **The demo KB gets a construction licence document (`06_...txt`).** The expired tax clearance stays as the deliberate blocker (issue 29 -> option a).
 
+- **A pipeline run is its own record (Prompt 8).** `tenders.status` stays the state machine. `pipeline_runs` is the history of passes over it (stages, durations, errors), and agent_runs rows link to the run that wrote them. Stage results live in one JSONB column, because the UI reads a run whole and nothing queries individual stages.
+- **Agents keep owning their status writes**; the orchestrator checks them against `TRANSITIONS` afterwards. That keeps the CLIs (`agents.scout --db`) working without the orchestrator, and a stage that breaks the table fails the run loudly.
+- **Resume is derived, not stored.** There is no `failed_stage` column: each failing stage already deletes its partial output, so the stored data says how far the tender got, whoever ran it.
+- **`stopped` is a separate run status from `failed`.** Skipped and blocked are expected business outcomes, and the Runs page should not show them as errors.
+- **Background work = FastAPI `BackgroundTasks` plus a DB guard** (partial unique index, heartbeat reaper). No queue or APScheduler: one process, and a crash is recovered by the startup reaper and the next analyze.
+- **Pre-cache = a replay cache inside `LLMClient`, not a DB snapshot.** On stage the real pipeline runs (deterministic code, retrieval, agent_runs, the Runs page animating), and only the model answers come from the file. The audit log stays honest (`cached=true`), and a miss falls back to the live model. The cost is that keys include prompts, so the KB chunk ids must match the recording (fresh DB + `--seed-company`; `--check` verifies).
+
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
 - `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
@@ -225,6 +290,10 @@
 
 - §11 `compliance_items` gained structured evidence columns + `action_needed` + `source`, plus a new `compliance_overrides` table (spec has none; the override is required by this task). `evidence` (TEXT) is kept as a readable summary.
 - §10.2: a new route `POST /tenders/{id}/compliance/override`; `POST /tenders/{id}/proposal` now has a 409 gate (still 501 behind it). `TenderDetail.compliance` is a `ComplianceView`, not a bare `ComplianceReport`.
+- §10.2 (Prompt 8):
+  - `GET /runs/{id}` returns a **pipeline run** (`PipelineRunDetail`: stages + durations + its agent_runs rows), not a single agent_runs row. There is a new `GET /runs` list.
+  - `POST /tenders/{id}/analyze` returns 202 + the run (background task) instead of the tender detail, and it also runs Scout on a `new` tender. `POST /tenders/scrape` still does not enqueue anything.
+- §11: a new `pipeline_runs` table; `agent_runs` gains `pipeline_run_id` (FK) and `cached`.
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -294,13 +363,25 @@ New (Prompt 7):
 46. **Turnover stays `unclear`** when the notice says "best 3 of the last 5 years" (Scout leaves `turnover_years` null) and because the demo KB has no `audit_report` documents. Supporting "best N of M" in `TenderCriteria` + NP-TURNOVER, and adding audited statements to the demo KB, would fix both.
 47. `covering_rules` / `_RESIDUAL` are keyword lists tuned on 7 synthetic notices (English + Nepali). Real notices will word things differently `[VERIFY]`; a miss means a requirement is judged only by the rule (if covered) or only by the model.
 48. No UI yet for the compliance checklist, `action_needed` or the override form (who/why). The web app should show `evidence_quote` next to the chunk and the document link.
-49. Analyze is synchronous: Matching plus about 3 model calls per tender, which is slow on the 7B model on CPU. A background job may be needed for the demo (spec §17: pre-cached analyses).
+49. ~~Analyze is synchronous~~: fixed in Prompt 8 (background run + replay cache).
+
+New (Prompt 8):
+50. **`data/demo_cache/llm_cache.json` has not been recorded.** On the demo machine with Ollama up and a fresh DB: `cd api && uv run python -m api.scripts.precache_demo --seed-company`, then `--check`. Decide whether to commit the file. It is plain JSON of synthetic-notice outputs plus about 1024 floats per chunk/query, so expect a few MB.
+51. Replay keys include the prompts, and prompts cite KB chunk ids. Re-seeding a non-fresh DB (`seed_demo` deletes and re-inserts documents, so ids grow) makes Matching/Compliance miss, which means live model calls. `--check` detects this. A content-addressed chunk citation would remove the coupling, but that is a prompt and contract change.
+52. The reaper's stale threshold (600 s) assumes a stage makes progress at least every 2×`LLM_TIMEOUT_S`. A Compliance stage with many requirements bumps the heartbeat per call, so it is fine. A worker that is still alive but past the threshold is marked failed, yet still writes its real outcome when it finishes.
+53. Background tasks share the process with the API. With several uvicorn workers, the startup reaper of one worker would fail another worker's live runs. Run a single worker (the Docker CMD does today), or reap by age only.
+54. Proposal/Review runners are `None`. When those agents land:
+    - extend `resume_status` (a proposals row means `checked` was completed);
+    - wire them in `default_runners`;
+    - implement "review fail → one revision pass" (spec §10.3);
+    - `POST /proposals/{id}/approve` is the human `reviewed→approved` edge.
+55. No UI yet for the Runs page / polling (spec Day 6, member C). The API is ready: `GET /runs`, `GET /runs/{id}`, and analyze returns the run id.
 
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
 ## Next prompt
-Prompt 8: get a real model running (issues 12/13), then measure everything that is still unmeasured: `pytest -m ollama`, `score_scout --manifest` (35), `score_matching --llm` (40) and `score_compliance --llm` (44). Record the numbers and tune the prompts only against those misses. Then:
-- wire Scout -> Matching (-> Compliance) from `POST /tenders/scrape` as a background task;
-- start the Proposal agent behind `agents.compliance.proposal_allowed` (RAG per section, cite chunk ids, use the compliance report's `action_needed` items as known gaps);
+Prompt 9: get a real model running (issues 12/13), then measure everything that is still unmeasured: `pytest -m ollama`, `score_scout --manifest` (35), `score_matching --llm` (40) and `score_compliance --llm` (44). Record the numbers and tune the prompts only against those misses. Then record the demo replay cache (issue 50: `precache_demo --seed-company`, then `--check`). After that:
+- optionally let `POST /tenders/scrape` start pipeline runs (`orchestrator.start_run` + `execute_run` per new tender, target `extracted` or `checked`);
+- start the Proposal agent as the orchestrator's Proposal runner (issue 54) behind `agents.compliance.proposal_allowed` (RAG per section, cite chunk ids, use the compliance report's `action_needed` items as known gaps);
 - optional quick wins for compliance quality: "best N of M" turnover (46) and the experience `similar` classification (45).

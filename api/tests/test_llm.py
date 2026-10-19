@@ -136,3 +136,94 @@ def test_embed_returns_vectors(make_client):
 def test_embed_rejects_wrong_dimension(make_client):
     with pytest.raises(LLMTransportError, match="768-dim"):
         make_client(FakeOllama(embed_dim=768), []).embed(["x"])
+
+
+# --- replay cache (pre-cached demo) ---------------------------------------------------------------------------
+
+def cached_client(settings, fake, runs, cache):
+    return LLMClient(runs.append, settings, transport=httpx.MockTransport(fake.handler), cache=cache)
+
+
+def test_replay_cache_records_then_replays_without_http(settings, tmp_path):
+    from pipeline.llm import ReplayCache
+
+    path = tmp_path / "cache.json"
+    live, runs = FakeOllama([VALID_MATCH]), []
+    first = cached_client(settings, live, runs, ReplayCache(path, record=True)).chat(
+        stage=Stage.MATCHING, messages=MESSAGES, schema=MatchAssessment, tender_id=7)
+    assert path.is_file() and runs[0].cached is False
+
+    replay, runs2 = FakeOllama([]), []  # any HTTP call would pop from an empty list and blow up
+    cache = ReplayCache(path)
+    again = cached_client(settings, replay, runs2, cache).chat(
+        stage=Stage.MATCHING, messages=MESSAGES, schema=MatchAssessment, tender_id=7)
+    assert again == first and replay.requests == [] and (cache.hits, cache.misses) == (1, 0)
+    [run] = runs2
+    assert (run.ok, run.cached, run.model, run.input_hash) == (True, True, "test-model", runs[0].input_hash)
+    assert run.output_json == runs[0].output_json
+
+
+def test_replay_cache_miss_calls_the_model_and_read_only_cache_is_not_written(settings, tmp_path):
+    from pipeline.llm import ReplayCache
+
+    path = tmp_path / "cache.json"
+    cache = ReplayCache(path)  # read-only
+    fake, runs = FakeOllama([VALID_MATCH]), []
+    cached_client(settings, fake, runs, cache).chat(stage=Stage.MATCHING, messages=MESSAGES, schema=MatchAssessment)
+    assert len(fake.requests) == 1 and cache.misses == 1 and runs[0].cached is False
+    assert not path.exists()
+
+
+def test_replay_cache_entry_that_no_longer_validates_is_ignored(settings, tmp_path):
+    from pipeline.llm import ReplayCache
+
+    path = tmp_path / "cache.json"
+    recorder = ReplayCache(path, record=True)
+    cached_client(settings, FakeOllama([VALID_MATCH]), [], recorder).chat(
+        stage=Stage.MATCHING, messages=MESSAGES, schema=MatchAssessment)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    [key] = data["chat"]
+    data["chat"][key]["output"]["score"] = "72"  # a string is never coerced, not even from the cache
+    path.write_text(json.dumps(data), encoding="utf-8")
+    fake, runs = FakeOllama([VALID_MATCH]), []
+    cached_client(settings, fake, runs, ReplayCache(path)).chat(stage=Stage.MATCHING, messages=MESSAGES, schema=MatchAssessment)
+    assert len(fake.requests) == 1 and runs[0].cached is False
+
+
+def test_replay_cache_is_keyed_by_model(settings, tmp_path):
+    from config import Settings
+    from pipeline.llm import ReplayCache
+
+    path = tmp_path / "cache.json"
+    cached_client(settings, FakeOllama([VALID_MATCH]), [], ReplayCache(path, record=True)).chat(
+        stage=Stage.MATCHING, messages=MESSAGES, schema=MatchAssessment)
+    other = Settings(llm_base_url="http://ollama.test", llm_model="other-model", embed_model="test-embed")
+    fake = FakeOllama([VALID_MATCH])
+    cached_client(other, fake, [], ReplayCache(path)).chat(stage=Stage.MATCHING, messages=MESSAGES, schema=MatchAssessment)
+    assert len(fake.requests) == 1
+
+
+def test_replay_cache_embeddings_only_fetch_missing_texts(settings, tmp_path):
+    from pipeline.llm import ReplayCache
+
+    path = tmp_path / "cache.json"
+    fake = FakeOllama(embed_fn=lambda t: [float(len(t))] + [0.0] * (EMBED_DIM - 1))
+    client = cached_client(settings, fake, [], ReplayCache(path, record=True))
+    client.embed(["a", "bb"])
+    vectors = client.embed(["bb", "ccc", "a"])
+    assert [v[0] for v in vectors] == [2.0, 3.0, 1.0]
+    assert [r["body"]["input"] for r in fake.requests] == [["a", "bb"], ["ccc"]]
+    replay = FakeOllama(embed_status=500)
+    assert [v[0] for v in cached_client(settings, replay, [], ReplayCache(path)).embed(["ccc", "a"])] == [3.0, 1.0]
+    assert replay.requests == []
+
+
+def test_llm_replay_cache_setting_is_picked_up(tmp_path):
+    from config import Settings
+    from pipeline.llm import ReplayCache
+
+    path = tmp_path / "cache.json"
+    assert LLMClient(lambda _r: None, Settings(llm_replay_cache=str(path))).cache is None  # no file yet
+    ReplayCache(path, record=True).put_embeddings({"k": [0.0]})
+    client = LLMClient(lambda _r: None, Settings(llm_replay_cache=str(path)))
+    assert client.cache is not None and client.cache.record is False

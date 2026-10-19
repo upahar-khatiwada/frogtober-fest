@@ -10,7 +10,11 @@ and embedding call in this codebase goes through `LLMClient`.
 - per-call timeout, total latency captured;
 - exactly one `AgentRunRecord` per call goes to `run_recorder`, on success
   and on failure (hard rule 9);
-- temperature is fixed per stage (hard rule 7).
+- temperature is fixed per stage (hard rule 7);
+- an optional `ReplayCache` (LLM_REPLAY_CACHE) answers repeated requests
+  from validated outputs saved by a real run (the pre-cached demo, spec
+  section 10.5). A replayed call still validates and still writes its
+  agent_runs row, marked `cached`.
 
 Endpoint and models come from config (LLM_BASE_URL, LLM_MODEL, EMBED_MODEL),
 so an open-weight hosted fallback is a config change (hard rule 1).
@@ -19,8 +23,11 @@ so an open-weight hosted fallback is a config change (hard rule 1).
 import copy
 import hashlib
 import json
+import os
+import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypeVar
 
 import httpx
@@ -95,6 +102,72 @@ def _truncate(text: str | None) -> str | None:
     return text[:_RAW_OUTPUT_LIMIT] + "...[truncated]"
 
 
+class ReplayCache:
+    """Validated chat outputs keyed by request hash, and embeddings keyed by (model, text), in one JSON file.
+
+    The chat key is `chat()`'s input hash (model, stage, messages, schema, temperature), so any change to a
+    prompt, the retrieved chunks or the model misses and falls through to the live model. `record=True` stores
+    every live result (and rewrites the file); otherwise the cache is read-only.
+    """
+
+    VERSION = 1
+
+    def __init__(self, path: Path | str, *, record: bool = False) -> None:
+        self.path = Path(path)
+        self.record = record
+        self.hits = 0
+        self.misses = 0
+        self._lock = threading.Lock()
+        data: dict[str, Any] = {}
+        if self.path.is_file():
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            if data.get("version") != self.VERSION:
+                raise ValueError(f"{self.path}: unsupported replay cache version {data.get('version')!r}")
+        self.chat: dict[str, dict[str, Any]] = data.get("chat", {})
+        self.embeddings: dict[str, list[float]] = data.get("embed", {})
+
+    @staticmethod
+    def embed_key(model: str, text: str) -> str:
+        return hashlib.sha256(f"{model}\n{text}".encode("utf-8")).hexdigest()
+
+    def get_chat(self, input_hash: str) -> dict[str, Any] | None:
+        entry = self.chat.get(input_hash)
+        with self._lock:
+            if entry is None:
+                self.misses += 1
+            else:
+                self.hits += 1
+        return entry
+
+    def put_chat(self, input_hash: str, *, stage: Stage, model: str, output: dict[str, Any]) -> None:
+        if self.record:
+            with self._lock:
+                self.chat[input_hash] = {"stage": stage.value, "model": model, "output": output}
+                self._save()
+
+    def get_embedding(self, key: str) -> list[float] | None:
+        vector = self.embeddings.get(key)
+        with self._lock:
+            if vector is None:
+                self.misses += 1
+            else:
+                self.hits += 1
+        return vector
+
+    def put_embeddings(self, items: dict[str, list[float]]) -> None:
+        if self.record and items:
+            with self._lock:
+                self.embeddings.update(items)
+                self._save()
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        payload = {"version": self.VERSION, "chat": self.chat, "embed": self.embeddings}
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, self.path)
+
+
 class LLMClient:
     """Synchronous Ollama client. Pass `transport=httpx.MockTransport(...)` in tests."""
 
@@ -105,8 +178,13 @@ class LLMClient:
         *,
         transport: httpx.BaseTransport | None = None,
         timeout_s: float | None = None,
+        cache: ReplayCache | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        # Explicit cache wins; else LLM_REPLAY_CACHE (read-only) if the file exists.
+        if cache is None and self.settings.llm_replay_cache and Path(self.settings.llm_replay_cache).is_file():
+            cache = ReplayCache(self.settings.llm_replay_cache)
+        self.cache = cache
         self.model = self.settings.llm_model
         self.embed_model = self.settings.embed_model
         self._record = run_recorder
@@ -159,6 +237,8 @@ class LLMClient:
         attempts = 0
         started = time.perf_counter()
 
+        cached = False
+
         def record(ok: bool, output: BaseModel | None = None) -> None:
             self._record(
                 AgentRunRecord(
@@ -172,8 +252,19 @@ class LLMClient:
                     attempts=max(attempts, 1),
                     error=error,
                     raw_output=None if ok else _truncate(raw),
+                    cached=cached,
                 )
             )
+
+        if self.cache is not None and (entry := self.cache.get_chat(input_hash)) is not None:
+            try:
+                result = schema.model_validate_json(json.dumps(entry["output"], ensure_ascii=False), strict=True)
+            except (ValidationError, KeyError, TypeError):
+                pass  # a stale entry (schema changed): ignore it and ask the live model
+            else:
+                cached = True
+                record(ok=True, output=result)
+                return result
 
         for attempts in (1, 2):
             try:
@@ -200,6 +291,8 @@ class LLMClient:
 
             error = None
             record(ok=True, output=result)
+            if self.cache is not None:
+                self.cache.put_chat(input_hash, stage=stage, model=self.model, output=result.model_dump(mode="json"))
             return result
 
         record(ok=False)
@@ -242,6 +335,19 @@ class LLMClient:
         """
         if not texts:
             return []
+        if self.cache is None:
+            return self._embed_live(texts)
+        keys = [ReplayCache.embed_key(self.embed_model, t) for t in texts]
+        found = {k: v for k in dict.fromkeys(keys) if (v := self.cache.get_embedding(k)) is not None}
+        missing = [t for t, k in zip(texts, keys) if k not in found]
+        if missing:
+            unique = list(dict.fromkeys(missing))
+            fresh = dict(zip((ReplayCache.embed_key(self.embed_model, t) for t in unique), self._embed_live(unique)))
+            self.cache.put_embeddings(fresh)
+            found.update(fresh)
+        return [found[k] for k in keys]
+
+    def _embed_live(self, texts: list[str]) -> list[list[float]]:
         data = self._post("/api/embed", {"model": self.embed_model, "input": texts})
         vectors = data.get("embeddings") if isinstance(data, dict) else None
         if not isinstance(vectors, list) or len(vectors) != len(texts):

@@ -42,7 +42,7 @@ POINTS = {"procurement_type": 30, "geography": 30, "budget": 25, "deadline": 15}
 # Statuses Matching may (re)run from (`failed` only with a Scout record, i.e. a failed Matching run).
 # Later stages keep their match; re-matching them would skip past Compliance.
 MATCHABLE = {TenderStatus.EXTRACTED, TenderStatus.MATCHED, TenderStatus.SKIPPED, TenderStatus.FAILED}
-# With `rematch=True` (only `pipeline.orchestrator.analyze_tender`, which re-runs Compliance right after).
+# With `rematch=True` (only the `pipeline.orchestrator` Matching step, which re-runs Compliance right after).
 REMATCHABLE = MATCHABLE | {TenderStatus.CHECKED, TenderStatus.BLOCKED}
 
 DETERMINISTIC_MODEL = "deterministic"  # agent_runs.model for a run that made no LLM call

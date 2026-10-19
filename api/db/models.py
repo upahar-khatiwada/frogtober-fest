@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -41,6 +42,7 @@ from schemas.enums import (
     ProcurementType,
     ProposalStatus,
     Province,
+    RunStatus,
     Severity,
     Stage,
     TenderStatus,
@@ -251,4 +253,38 @@ class AgentRunRow(Base):
     attempts: Mapped[int] = mapped_column(Integer, server_default="1")
     error: Mapped[str | None] = mapped_column(Text)
     raw_output: Mapped[str | None] = mapped_column(Text)
+    # Set while the orchestrator runs this tender (db.runs.current_pipeline_run); null for CLI/ad-hoc calls.
+    pipeline_run_id: Mapped[int | None] = mapped_column(ForeignKey("pipeline_runs.id", ondelete="SET NULL"), index=True)
+    # Replayed from the LLM replay cache (pre-cached demo), not a live model call.
+    cached: Mapped[bool] = mapped_column(Boolean, server_default="false")
     created_at: Mapped[datetime] = mapped_column(TS, server_default=func.now())
+
+
+_ACTIVE_RUN = f"status IN ('{RunStatus.QUEUED.value}', '{RunStatus.RUNNING.value}')"
+
+
+class PipelineRun(Base):
+    """One orchestrated pass over one tender (pipeline/orchestrator.py), polled via GET /runs/{id}."""
+
+    __tablename__ = "pipeline_runs"
+    __table_args__ = (
+        enum_check("status", RunStatus, "ck_pipeline_runs_status"),
+        enum_check("target", TenderStatus, "ck_pipeline_runs_target"),
+        # At most one queued/running run per tender: a second analyze gets 409, not a race.
+        Index("uq_pipeline_runs_active_tender", "tender_id", unique=True, postgresql_where=text(_ACTIVE_RUN)),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tender_id: Mapped[int] = mapped_column(ForeignKey("tenders.id", ondelete="CASCADE"), index=True)
+    target: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=RunStatus.QUEUED.value)
+    start_status: Mapped[str] = mapped_column(Text)
+    resumed_from: Mapped[str | None] = mapped_column(Text)
+    end_status: Mapped[str | None] = mapped_column(Text)
+    stages: Mapped[list[Any]] = mapped_column(JSONB, server_default="[]")  # list[StageRun]
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(TS, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(TS)
+    finished_at: Mapped[datetime | None] = mapped_column(TS)
+    # Bumped on every stage start/finish and every agent_runs row; a stale heartbeat means the worker died.
+    heartbeat_at: Mapped[datetime] = mapped_column(TS, server_default=func.now())

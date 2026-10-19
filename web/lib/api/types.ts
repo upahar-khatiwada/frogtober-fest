@@ -78,10 +78,11 @@ export interface paths {
         put?: never;
         /**
          * Analyze Tender
-         * @description Run Matching, then Compliance if pursued: status becomes skipped, checked or blocked.
+         * @description Start a pipeline run in the background (Scout if still new, Matching, then Compliance if pursued) and return it.
          *
-         *     A model failure returns the tender with status `failed`. Re-running on a checked/blocked tender (e.g. after
-         *     uploading a renewed document) re-checks it; an earlier override still holds only if it covers every new hard failure.
+         *     Poll GET /runs/{id} for stage statuses; the tender ends checked, skipped, blocked or failed. A failed tender
+         *     resumes from its last good state. Re-running a checked/blocked/skipped tender (e.g. after uploading a renewed
+         *     document) re-matches and re-checks it; an earlier override still holds only if it covers every new hard failure.
          */
         post: operations["analyze_tender_tenders__tender_id__analyze_post"];
         delete?: never;
@@ -218,6 +219,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description Pipeline runs, newest first (the Runs page).
+         */
+        get: operations["list_runs_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}": {
         parameters: {
             query?: never;
@@ -227,7 +248,7 @@ export interface paths {
         };
         /**
          * Get Run
-         * @description Run status for polling (web/ polls this every 2s per spec section 9.2).
+         * @description Run status for polling (the UI polls every 2 s, spec section 9.2): stages with durations, plus its agent_runs.
          */
         get: operations["get_run_runs__run_id__get"];
         put?: never;
@@ -264,7 +285,7 @@ export interface components {
     schemas: {
         /**
          * AgentRun
-         * @description A stored agent_runs row, as served by GET /runs/{id}.
+         * @description A stored agent_runs row.
          */
         AgentRun: {
             /** Tender Id */
@@ -297,13 +318,34 @@ export interface components {
              * @description Last raw model output, kept on failure for debugging.
              */
             raw_output?: string | null;
+            /**
+             * Cached
+             * @description Replayed from the LLM replay cache (LLM_REPLAY_CACHE), not a live model call.
+             * @default false
+             */
+            cached: boolean;
             /** Id */
             id: number;
+            /** Pipeline Run Id */
+            pipeline_run_id?: number | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * AnalyzeRequest
+         * @description POST /tenders/{id}/analyze body (optional).
+         */
+        AnalyzeRequest: {
+            /**
+             * @description Stop once the tender reaches this status.
+             * @default checked
+             */
+            target: components["schemas"]["TenderStatus"];
+            /** @description Re-run from this stage even if the tender is past it (e.g. `scout` re-extracts). Default: continue from the tender's last good state. */
+            from_stage?: components["schemas"]["Stage"] | null;
         };
         /** AnnualTurnover */
         AnnualTurnover: {
@@ -825,6 +867,74 @@ export interface components {
          */
         NoticeLanguage: "en" | "ne" | "mixed";
         /**
+         * PipelineRunDetail
+         * @description GET /runs/{id}: the run plus every agent_runs row it wrote.
+         */
+        PipelineRunDetail: {
+            /** Id */
+            id: number;
+            /** Tender Id */
+            tender_id: number;
+            /** Tender Title */
+            tender_title?: string | null;
+            target: components["schemas"]["TenderStatus"];
+            status: components["schemas"]["RunStatus"];
+            start_status: components["schemas"]["TenderStatus"];
+            /** @description Set when the run restarted a failed tender from its last good state. */
+            resumed_from?: components["schemas"]["TenderStatus"] | null;
+            end_status?: components["schemas"]["TenderStatus"] | null;
+            /** Stages */
+            stages: components["schemas"]["StageRun"][];
+            /** Error */
+            error?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Agent Runs */
+            agent_runs: components["schemas"]["AgentRun"][];
+        };
+        /**
+         * PipelineRunView
+         * @description A pipeline run for the Runs page and polling.
+         */
+        PipelineRunView: {
+            /** Id */
+            id: number;
+            /** Tender Id */
+            tender_id: number;
+            /** Tender Title */
+            tender_title?: string | null;
+            target: components["schemas"]["TenderStatus"];
+            status: components["schemas"]["RunStatus"];
+            start_status: components["schemas"]["TenderStatus"];
+            /** @description Set when the run restarted a failed tender from its last good state. */
+            resumed_from?: components["schemas"]["TenderStatus"] | null;
+            end_status?: components["schemas"]["TenderStatus"] | null;
+            /** Stages */
+            stages: components["schemas"]["StageRun"][];
+            /** Error */
+            error?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+        };
+        /**
          * ProcurementMethod
          * @enum {string}
          */
@@ -967,6 +1077,12 @@ export interface components {
          */
         ReviewVerdict: "pass" | "fail";
         /**
+         * RunStatus
+         * @description A pipeline run (`pipeline_runs`, GET /runs): one orchestrated pass over one tender.
+         * @enum {string}
+         */
+        RunStatus: "queued" | "running" | "succeeded" | "stopped" | "failed";
+        /**
          * ScrapeReport
          * @description Outcome of one load. Tenders are stored as raw text with status `new`; Scout extracts later.
          */
@@ -1048,6 +1164,31 @@ export interface components {
          * @enum {string}
          */
         Stage: "scout" | "matching" | "compliance" | "proposal" | "review";
+        /**
+         * StageRun
+         * @description One stage of a pipeline run, as stored in `pipeline_runs.stages`.
+         */
+        StageRun: {
+            stage: components["schemas"]["Stage"];
+            /** @default pending */
+            status: components["schemas"]["StageStatus"];
+            from_status: components["schemas"]["TenderStatus"];
+            to_status?: components["schemas"]["TenderStatus"] | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * StageStatus
+         * @description One stage inside a pipeline run (`pipeline_runs.stages[]`). JSONB only, so no CHECK constraint.
+         * @enum {string}
+         */
+        StageStatus: "pending" | "running" | "ok" | "branched" | "failed" | "not_run";
         /**
          * TenderCriteria
          * @description Numeric qualification criteria from the notice (Scout fills the amounts; counts when written in digits/words).
@@ -1376,15 +1517,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AnalyzeRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TenderDetail"];
+                    "application/json": components["schemas"]["PipelineRunView"];
                 };
             };
             /** @description No such tender */
@@ -1394,7 +1539,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Not extracted yet, already past Compliance, or no company profile */
+            /** @description Already running, nothing to do for this status/target, or no company profile */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1716,6 +1861,40 @@ export interface operations {
             };
         };
     };
+    list_runs_runs_get: {
+        parameters: {
+            query?: {
+                tender_id?: number | null;
+                status?: components["schemas"]["RunStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_run_runs__run_id__get: {
         parameters: {
             query?: never;
@@ -1733,8 +1912,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentRun"];
+                    "application/json": components["schemas"]["PipelineRunDetail"];
                 };
+            };
+            /** @description No such run */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1744,13 +1930,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
-            };
-            /** @description Not implemented yet */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

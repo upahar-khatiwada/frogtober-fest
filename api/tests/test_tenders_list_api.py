@@ -154,10 +154,12 @@ def test_analyze_runs_matching_and_ranks(api, db_session):
     good = add(db_session, "good", deadline_ad=NOW + timedelta(days=30))
     off = add(db_session, "off", deadline_ad=NOW + timedelta(days=30), district="Jumla", province="karnali")
     api.holder["llm"] = make_llm(FakeOllama([assessment_json(85)], embed_fn=bag_of_words_vector))
-    r1 = api.post(f"/tenders/{good.id}/analyze")
-    r2 = api.post(f"/tenders/{off.id}/analyze")
+    for t in (good, off):  # 202: a background run (TestClient runs it before returning)
+        resp = api.post(f"/tenders/{t.id}/analyze")
+        assert resp.status_code == 202 and resp.json()["status"] == "queued", resp.text
+    r1, r2 = (api.get(f"/tenders/{t.id}") for t in (good, off))
     # Pursued -> Compliance runs. This fixture KB has only an experience certificate, so the rules hard-fail it.
-    assert r1.status_code == 200 and r1.json()["match"]["decision"] == "pursue"
+    assert r1.json()["match"]["decision"] == "pursue"
     assert r1.json()["status"] == "blocked" and r1.json()["compliance"]["blocked"] is True
     assert r2.json()["status"] == "skipped" and "Jumla" in r2.json()["match"]["skip_reasons"][0]
     assert r2.json()["compliance"] is None  # a skipped tender never reaches Compliance
@@ -170,10 +172,15 @@ def test_analyze_runs_matching_and_ranks(api, db_session):
 def test_analyze_conflicts(api, db_session):
     seed_company(db_session)
     new = Tender(source_url="new", raw_text="x", status="new")
-    db_session.add(new)
+    drafted = Tender(source_url="drafted", raw_text="x", status="drafted")
+    db_session.add_all([new, drafted])
     db_session.commit()
     api.holder["llm"] = make_llm(FakeOllama([]))
-    assert api.post(f"/tenders/{new.id}/analyze").status_code == 409
+    assert api.post(f"/tenders/{drafted.id}/analyze").status_code == 409  # proposal work exists; needs from_stage
+    assert api.post(f"/tenders/{new.id}/analyze", json={"target": "approved"}).status_code == 409  # human-only
+    assert api.post(f"/tenders/{new.id}/analyze", json={"target": "drafted"}).status_code == 409  # no Proposal agent yet
+    assert api.post(f"/tenders/{new.id}/analyze", json={"from_stage": "matching"}).status_code == 409  # not extracted
+    assert api.post(f"/tenders/{new.id}/analyze", json={"bogus": 1}).status_code == 422
     assert api.post("/tenders/99999/analyze").status_code == 404
 
 

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Ollama context window per chat call. Ollama's default (2048-4096) silently drops the
     # start of the prompt (the system prompt) on long Devanagari notices; 0 = Ollama default.
     llm_num_ctx: int = 8192
+    # LLM replay cache (spec section 10.5 "pre-analyzed and cached"): a JSON file of validated chat outputs keyed by
+    # request hash, plus embeddings. A hit skips the model; a miss calls it. Empty = off.
+    # Written by `python -m api.scripts.precache_demo`.
+    llm_replay_cache: str = ""
 
     # --- Database ---
     database_url: str = "postgresql://tenderly:tenderly@localhost:5432/tenderly"
@@ -60,6 +64,11 @@ class Settings(BaseSettings):
     # --- Compliance (agents/compliance.py) ---
     # KB chunks retrieved per requirement the rules do not cover, and shown to the model.
     compliance_top_k: int = 4
+
+    # --- Pipeline orchestrator (pipeline/orchestrator.py) ---
+    # A queued/running run whose heartbeat is older than this is marked failed ("interrupted"). The heartbeat is
+    # bumped per stage and per model call, so this must exceed one call with its retry (2 x LLM_TIMEOUT_S).
+    pipeline_stale_after_s: float = 600.0
 
     # --- CORS: the Next.js web origin(s) allowed to call this API ---
     web_origin: str = "http://localhost:3000"

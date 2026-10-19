@@ -26,9 +26,12 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
       SEED_TENDERS_DIR: /data/seed_tenders
       SCRAPER_CONTACT: ${SCRAPER_CONTACT:-}
+      # Pre-cached demo analyses (api/scripts/precache_demo.py); ignored while the file does not exist.
+      LLM_REPLAY_CACHE: ${LLM_REPLAY_CACHE:-/data/demo_cache/llm_cache.json}
     volumes:
       # Synthetic seed tenders for POST /tenders/scrape (data/ is outside the api build context).
       - ./data/seed_tenders:/data/seed_tenders:ro
+      - ./data/demo_cache:/data/demo_cache:ro
     depends_on:
       db:
         condition: service_healthy
