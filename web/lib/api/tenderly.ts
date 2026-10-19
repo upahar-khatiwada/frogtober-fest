@@ -211,7 +211,15 @@ export async function getTender(id: number): Promise<TenderDetail | null> {
   );
   if (response.status === 404) return null;
   if (!data) fail(error, response);
-  return data;
+  return asTenderDetail(data);
+}
+
+/**
+ * openapi-fetch's Readable<T> maps arrays element-wise, which widens the FieldSource.span
+ * tuple ([start, end)) to number[]. The generated schema type is the accurate one.
+ */
+function asTenderDetail(data: unknown): TenderDetail {
+  return data as TenderDetail;
 }
 
 /** POST /tenders/{id}/analyze: 202 + a queued run. Poll it with getRun. */
@@ -250,7 +258,7 @@ export async function overrideCompliance(
     },
   );
   if (!data) fail(error, response);
-  return data;
+  return asTenderDetail(data);
 }
 
 /** POST /tenders/{id}/proposal. 409 while blocked; 501 until the Proposal agent exists. */
