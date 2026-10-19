@@ -1,4 +1,5 @@
 import { AlertTriangle, ShieldAlert } from "lucide-react";
+import Link from "next/link";
 
 import { DeadlineDisplay } from "@/components/deadline-display";
 import { Money } from "@/components/money";
@@ -49,11 +50,13 @@ export function TenderRow({ tender }: { tender: TenderListItem }) {
       <div className="flex min-w-0 flex-col gap-2">
         <div className="flex flex-wrap items-start gap-2">
           <h2 className="min-w-0 flex-1 text-base font-semibold leading-snug" lang={tender.language === "ne" ? "ne" : undefined}>
-            {tender.title ?? (
-              <span className="text-muted-foreground">
-                <T k="tender.untitled" />
-              </span>
-            )}
+            <Link href={`/tenders/${tender.id}`} className="underline-offset-4 hover:underline">
+              {tender.title ?? (
+                <span className="text-muted-foreground">
+                  <T k="tender.untitled" />
+                </span>
+              )}
+            </Link>
           </h2>
           <StatusBadge status={tender.status} />
         </div>
