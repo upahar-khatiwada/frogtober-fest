@@ -161,6 +161,7 @@ Scraper rules as implemented: robots.txt is read first (a 401/403/5xx or network
 - Official documents use **Bikram Sambat**. Example from the Rules' title page: "Date of Publication in Nepal Gazette: 2064-5-3 B.S. (20 August 2007 A.D.)" (PPR-EN). BS runs about **56 years 8 months ahead** of AD (2064 BS ≈ 2007 AD, same source).
 - **Date formats seen in notices:** `YYYY-MM-DD` / `YYYY/MM/DD` in BS (e.g. file names `invitation-bids-2079-07-29`: <https://nepalpolice.gov.np/media/filer_public/b7/d1/b7d137c9-b8f1-4cf7-97bc-9a36100dd313/invitation-bids-2079-07-29.pdf>, `Bolpatra 2078-07-17`), sometimes with Devanagari digits (e.g. `२०८१।०५।१५`, where `।` is used as a separator), and often with an AD date in brackets. Times are Nepal Time (**UTC+05:45**) `[VERIFY]` (no official source read; this is standard).
 - **BS→AD conversion cannot be done arithmetically.** BS month lengths (29–32 days) vary year to year and come from published tables. Use a vetted lookup-table library (e.g. a `nepali-datetime` / `bikram-sambat` package, which must be checked before adoption) and unit-test it against known pairs (2064-05-03 = 2007-08-20). `[VERIFY]` library choice.
+- **Libraries disagree on future BS years (observed 2026-10-19).** `nepali-datetime` (Python, used by `api/nepal/dates.py`) and the npm package `nepali-date-converter` 3.4.0 give the same date for every day from AD 2010 through BS 2083, but differ in BS **2084–2087** (e.g. Jestha 2084: 31 vs 32 days) and after 2090. Future BS month lengths are projections until the official calendar is published, so a date in that range (bid validity, licence expiry such as 2084-03-32) is only as good as the table `[VERIFY]` against the published 2084+ calendar. Tenderly uses one table everywhere: the web app's `web/lib/nepal/bs-calendar.json` is exported from `nepali-datetime` (`api/scripts/export_bs_calendar.py`, drift-tested).
 - **Months, in order:** Baisakh, Jestha, Asar (Ashadh), Shrawan, Bhadra, Asoj (Ashwin), Kartik, Mangsir, Poush, Magh, Falgun, Chaitra. `[VERIFY]` spelling variants (no source read; standard).
 - **Fiscal year:** begins **Shrawan 1** (mid-July) and ends on the last day of **Asar**. It is written as `2083/84` or `2083-84`. Sources (secondary): <https://app.khataacademy.com/pages/fiscal-year>; FY 2083/84 revenue reporting for its first month (Shrawan): <https://english.ratopati.com/story/75009/increase-in-government-revenue-in-the-month-of-shrawan-office-of-the-comptroller-and-auditor-general>. `[VERIFY]` against mof.gov.np. Tax clearance in notices is tied to an FY (§3 above), and this drives the document-expiry logic. Rule 85 of PPR-EN also refers to "one financial year".
 
@@ -191,7 +192,7 @@ Scraper rules as implemented: robots.txt is read first (a 401/403/5xx or network
 6. e-GP robots.txt, terms of use, and any open-data feed. (2026-10-19: still HTTP 403. Kankai municipality's robots.txt was checked instead and has no terms page, see section 6.)
 7. Whether the 2082 amendment bill / 2083 ordinance is in force.
 8. Official sources for the fiscal-year start, province names, district list, and NPT offset.
-9. BS↔AD conversion library choice.
+9. BS↔AD conversion library choice, and the BS 2084+ month lengths, where libraries disagree (§7).
 10. PPMO blacklist URL.
 11. PAN / VAT number format (not validated in `CompanyProfile` until confirmed).
 

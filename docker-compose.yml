@@ -9,6 +9,8 @@ services:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Server components fetch from inside the compose network; the browser uses NEXT_PUBLIC_API_URL.
+      API_URL: http://api:8000
     depends_on:
       - api
 

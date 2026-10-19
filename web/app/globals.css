@@ -128,3 +128,13 @@
     @apply font-sans;
   }
 }
+/* Latin from Geist, Devanagari from Noto Sans Devanagari (next/font variables set in app/layout.tsx).
+   Unlayered, so it wins over the self-referencing --font-sans in @theme inline. */
+:root {
+  --font-sans: var(--font-geist-sans), var(--font-noto-devanagari), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Devanagari has tall matras and conjuncts: give Nepali text a little more line height. */
+:lang(ne) {
+  line-height: 1.65;
+}
