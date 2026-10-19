@@ -70,11 +70,11 @@
   - Together these close open issue 30.
 - **Schema moves:** `TenderCriteria` and `SecurityCalc` moved to `schemas/tender.py` (re-exported from `nepal.rules` / `nepal`). `TenderRecord` gained the code-owned `criteria`, `bid_security_due`, `sources`, `review_flags` and `needs_review`, all stored in `record_json`, so no migration. `evaluate_rules` defaults `criteria` to `tender.criteria`. `deadline_ad` is now always set by code when the deadline is confirmed.
 - **DB write:** `run_scout(session, client, tender)` / `scout_new_tenders` fill `record_json` + the denormalised columns and set `extracted`, or `failed` on `LLMError` / empty text. The agent_runs row comes from the client callback (`db.make_run_recorder`) and holds the raw LLM extraction.
-- **CLI:** `cd api && uv run python -m agents.scout --seed [--only ..] [--json ..] [--db]` prints a field table (deadline BS/AD, cost, bid security, language, district, doc types, flags).
+- **CLI:** `cd api && uv run python -m api.agents.scout --seed [--only ..] [--json ..] [--db]` prints a field table (deadline BS/AD, cost, bid security, language, district, doc types, flags).
 - **Golden set:** `data/golden/scout_expected.json` has 15 ids. 5 are hand-labelled (001 mixed, 002 EN crore, 003 AD-only ICB, 005 "in thousands" ambiguity, 012 all-Nepali SQ): deadline BS + AD datetime, cost, required doc types. 10 are `todo`. The labelling rules are in the file. **Scorer:** `scripts/score_scout.py` reports field-level accuracy for deadline (BS, AD to the minute), budget, and docs (P/R/F1 + exact-set). A null label is correct only for null output, and a failed run is wrong on every field. `--manifest` also scores deadline/cost on all 37 seeds; `--predictions` scores saved CLI output.
 - `LLM_NUM_CTX` (default 8192) is passed as Ollama `num_ctx`. The default 2048/4096 window would silently drop the system prompt on long Devanagari notices. Added to `.env.example`.
 - `web/lib/api/types.ts` regenerated (`bun run gen:api`; TenderRecord's new fields).
-- **Tests:** `uv run pytest -q` gives **427 passed, 2 deselected** (was 359).
+- **Tests:** `uv run pytest -q` gives **427 passed, 2 deselected** (was 359); **430** after the CLI module-path follow-up.
   - `test_nepal_scout_parsers.py` (43): deadline formats; never-guess cases; every seed manifest deadline quote parses to its label; compound / mis-grouped amounts; percent/days; doc classification; FY.
   - `test_scout.py` (25): grounder; language vs all 37 manifest labels; a full 001 record from a hand-written ideal extraction; every source span points at its quote; a converted amount or deadline is not trusted; BS/AD mismatch; corrigendum; 034 garbled grouping; 005 thousands table; 033 percent security + compound cost; ambiguous district; hallucinated text flagged; fake-LLM call (schema, temperature 0, num_ctx, one agent_runs row, strict int rejection → retry → `LLMOutputError`); CLI table; Postgres `run_scout` (row columns, extracted/failed, agent_runs rows, no re-run); golden file vs manifest; scorer arithmetic.
   - New `-m ollama` smoke test runs Scout on seed 001.
@@ -128,13 +128,13 @@
 - **Code adds a `bid_security` RequiredDoc** when the bid security was extracted and the LLM did not list it as a document.
 - **Language is computed** from the Devanagari letter share (<0.02 en, >0.92 ne). The thresholds fit all 37 seeds; `[VERIFY]` on real notices.
 - **Golden-set doc labels** use the rules written into `scout_expected.json`: documents to submit or hold; criteria-only evidence (turnover, experience) is excluded unless the notice names the document; non-standard documents count as `other`.
+- **`python -m api.<module>` from `api/` (follow-up to Prompt 5b).** `api/` is a flat app, so there was no `api` package. `api/api/__init__.py` is an alias package whose `__path__` is `api/` itself, so `uv run python -m api.agents.scout --seed` and `python -m api.scripts.score_scout` work, and the flat `-m agents.scout` still works. App code keeps importing flat names; nothing may `import api.*`. A test (`test_cli_module_paths_import`) runs all three module paths. **It works from `api/` only.** From the repo root `uv run` finds no project (it would need a root uv workspace, which moves `uv.lock`/`.venv` to the root and breaks the api Dockerfile), so that was not done.
 
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
 - `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
 - §10.2 `POST /tenders/scrape` "enqueue Scout": not done yet. Scout exists (Prompt 5b) but is not wired to the endpoint. It returns a `ScrapeReport` instead of `list[TenderDetail]`.
 - §8.1 Scout output: the LLM emits `TenderExtraction` (raw strings) and code builds `TenderRecord`. The record is the same contract plus code-owned additive fields (`criteria`, `bid_security_due`, `sources`, `review_flags`, `needs_review`).
-- Prompt 5b asked for the dev CLI as `uv run python -m api.agents.scout --seed`. That module path cannot import: `api/` is a flat app, not a package, and uv must run from `api/`. The working command is `cd api && uv run python -m agents.scout --seed`.
 - §5.1 "one live portal scraper": the source is a municipal notice board, not a national portal. The national portal (bolpatra) blocks non-browser clients. And most live notices are scanned PDFs that yield no text without OCR (out of scope).
 - None in behaviour. Additive fields beyond §8.1/§11: `TenderStatus.failed`, `AgentRunRecord.attempts/error/raw_output` (the `agent_runs` table needs these three columns when migrations land), `ReviewGap.severity`, `ComplianceItem.explanation`. (The spec allowed bge-m3 *or* nomic-embed-text; choosing bge-m3 is a selection within the spec.)
 (Prompt 3 note, superseded: §8.2 was re-read in Prompt 5b; §13 still not re-read.)
@@ -189,7 +189,7 @@ New (Prompt 5a):
 34. Docker: the seed volume mount and compose change are not verified (no Docker on this machine, same as issue 24).
 
 New (Prompt 5b):
-35. **Scout has never run against a real model, so there are no accuracy numbers.** First thing once Ollama is up (issues 12/13): `cd api && uv run pytest -m ollama` (does the grammar accept `TenderExtraction`?), then `uv run python -m scripts.score_scout --manifest --out ../data/golden/report.json`, and record the numbers here. Expect the weak spots to be verbatim copying of Devanagari, picking the submission deadline rather than the opening date, and doc lists.
+35. **Scout has never run against a real model, so there are no accuracy numbers.** First thing once Ollama is up (issues 12/13): `cd api && uv run pytest -m ollama` (does the grammar accept `TenderExtraction`?), then `uv run python -m api.scripts.score_scout --manifest --out ../data/golden/report.json`, and record the numbers here. Expect the weak spots to be verbatim copying of Devanagari, picking the submission deadline rather than the opening date, and doc lists.
 36. Golden set: 10 of 15 entries are `todo` (004, 006, 007, 008, 011, 015, 021, 027, 033, 034). Their deadline/cost labels already exist in the manifest (`--manifest` scores them); the required-doc labels need a hand pass.
 37. Prompt size: the system prompt is about 1.1k tokens, plus the notice. With `LLM_NUM_CTX=8192` that is fine for seed notices, but long PDF attachments from the live scraper may exceed it. There is no chunking or truncation guard yet.
 38. The `दिनको` + hour 1–5 = PM heuristic and the language thresholds are unverified against real notices (NEPAL_CONTEXT §13 `[VERIFY]`).
@@ -199,7 +199,7 @@ Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
 ## Next prompt
-Prompt 6: get a real model running (issues 12/13), then run `pytest -m ollama` and `python -m scripts.score_scout --manifest` and record the Scout numbers in PROGRESS (issue 35). Tune `SYSTEM_PROMPT` only against those misses. Then wire the pipeline:
+Prompt 6: get a real model running (issues 12/13), then run `pytest -m ollama` and `python -m api.scripts.score_scout --manifest` and record the Scout numbers in PROGRESS (issue 35). Tune `SYSTEM_PROMPT` only against those misses. Then wire the pipeline:
 - `pipeline/orchestrator.py`: Scout for `new` tenders from `POST /tenders/scrape`, as a background task.
 - Implement `GET /tenders` / `GET /tenders/{id}` (`TenderDetail` with `record.sources` / `review_flags`).
 - Write the `documents` → `DocumentMeta` loader so `evaluate_rules` runs against the demo company, and decide issue 29.

@@ -67,6 +67,23 @@ bun run dev
 See the [Commands table in `CLAUDE.md`](CLAUDE.md#commands) for the full
 list (tests, DB migrations, API type generation, etc.).
 
+### Scout (tender extraction) dev CLI
+
+Run Scout over the 37 synthetic seed notices and print a field table
+(deadline BS/AD, cost, bid security, district, document types, review flags).
+It needs Ollama at `LLM_BASE_URL` with `LLM_MODEL` pulled. Run it from `api/`:
+
+```bash
+cd api
+uv run python -m api.agents.scout --seed                 # all seed notices
+uv run python -m api.agents.scout --seed --only 001,005  # a few
+uv run python -m api.agents.scout --seed --db            # also write tenders + agent_runs rows (DATABASE_URL)
+uv run python -m api.scripts.score_scout --manifest      # golden-set accuracy (deadline, budget, documents)
+```
+
+`python -m agents.scout` is the same module. The `api.` prefix works through
+the alias package `api/api/__init__.py`, and only from inside `api/`.
+
 ## Repository layout
 
 ```

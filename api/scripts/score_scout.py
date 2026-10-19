@@ -7,9 +7,9 @@ every field. With --manifest, deadline and cost are also scored on all seed noti
 against the `expected` blocks in data/seed_tenders/manifest.json.
 
 From api/:
-  uv run python -m scripts.score_scout                         # runs Scout on the real model (Ollama)
-  uv run python -m scripts.score_scout --manifest              # + deadline/cost on all 37 seeds
-  uv run python -m scripts.score_scout --predictions out.json  # score saved `agents.scout --json` output
+  uv run python -m api.scripts.score_scout                         # runs Scout on the real model (Ollama)
+  uv run python -m api.scripts.score_scout --manifest              # + deadline/cost on all 37 seeds
+  uv run python -m api.scripts.score_scout --predictions out.json  # score saved `agents.scout --json` output
 """
 
 import argparse
@@ -152,9 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     from config import get_settings
     from ingest.seed_tenders import load_manifest
 
-    ap = argparse.ArgumentParser(prog="python -m scripts.score_scout")
+    ap = argparse.ArgumentParser(prog="python -m api.scripts.score_scout")
     ap.add_argument("--golden", type=Path, default=GOLDEN_PATH)
-    ap.add_argument("--predictions", type=Path, help="JSON from `python -m agents.scout --seed --json PATH`")
+    ap.add_argument("--predictions", type=Path, help="JSON from `python -m api.agents.scout --seed --json PATH`")
     ap.add_argument("--manifest", action="store_true", help="also score deadline/cost on every seed notice")
     ap.add_argument("--out", type=Path, help="write the report as JSON")
     args = ap.parse_args(argv)

@@ -53,6 +53,7 @@ Tenderly/
     alembic/           # migrations (source of truth for the live schema); alembic.ini in api/
     scripts/           # seed_demo.py, build_demo_docs.py, score_scout.py (Scout golden-set scorer)
     deps.py            # FastAPI deps: get_session, get_sessionmaker, get_llm_client (tests override)
+    api/__init__.py    # alias package only: makes `python -m api.<module>` work from api/ (app code imports flat names)
     export/            # docx.py, pdf.py, package.py
     tests/
   data/demo_company/  # FICTIONAL demo SME: profile.json, manifest.json, 5 KB documents
@@ -97,8 +98,8 @@ Tender status state machine: `new → extracted → matched → checked → draf
 | Seed demo company | `cd api && uv run python -m scripts.seed_demo` (needs migrated DB + Ollama with `bge-m3`; idempotent; exits 1 if any doc is not `ready`). Rebuild its DOCX/PDFs: `uv run python -m scripts.build_demo_docs` |
 | Seed tenders | With the API running: `curl -X POST localhost:8000/tenders/scrape` (37 synthetic notices, idempotent, offline). Live scraper (slow, ≥10 s per request, mostly scanned PDFs): `curl -X POST localhost:8000/tenders/scrape -H "content-type: application/json" -d '{"source":"kankai","max_notices":3}'` |
 | Seed/scraper tests | `cd api && uv run pytest -q tests/test_seed_tenders.py tests/test_scraper.py tests/test_tenders_scrape_api.py` |
-| Scout dev CLI | `cd api && uv run python -m agents.scout --seed` (needs Ollama; prints a field table; `--only 001,005`, `--json out.json`, `--db` to upsert into `DATABASE_URL` and write tenders + agent_runs rows; exits 1 if any notice failed) |
-| Scout golden-set score | `cd api && uv run python -m scripts.score_scout [--manifest] [--out report.json]` (runs Scout on the real model; `--predictions out.json` scores saved CLI output offline). Labels: `data/golden/scout_expected.json` |
+| Scout dev CLI | `cd api && uv run python -m api.agents.scout --seed` (`-m agents.scout` is the same module; needs Ollama; prints a field table; `--only 001,005`, `--json out.json`, `--db` to upsert into `DATABASE_URL` and write tenders + agent_runs rows; exits 1 if any notice failed) |
+| Scout golden-set score | `cd api && uv run python -m api.scripts.score_scout [--manifest] [--out report.json]` (runs Scout on the real model; `--predictions out.json` scores saved CLI output offline). Labels: `data/golden/scout_expected.json` |
 | Scout tests | `cd api && uv run pytest -q tests/test_scout.py tests/test_nepal_scout_parsers.py` |
 | Frontend deps | `cd web && bun install` |
 | Frontend dev server | `cd web && bun run dev` |

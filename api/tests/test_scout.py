@@ -337,3 +337,15 @@ def test_scorer_on_ideal_extraction_of_001_is_perfect():
 def test_manifest_golden_covers_all_seeds():
     manifest = json.loads((SEED_DIR / "manifest.json").read_text(encoding="utf-8"))
     assert len(manifest_golden(manifest)) == len(manifest["notices"])
+
+
+@pytest.mark.parametrize("module", ["api.agents.scout", "agents.scout", "api.scripts.score_scout"])
+def test_cli_module_paths_import(module):
+    """`uv run python -m api.agents.scout` (the api/api alias package) and the flat form both start."""
+    import subprocess
+    import sys
+
+    out = subprocess.run([sys.executable, "-m", module, "--help"], cwd=Path(__file__).resolve().parents[1],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    assert "usage:" in out.stdout

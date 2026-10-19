@@ -17,7 +17,8 @@ Two halves, split along CLAUDE.md hard rule 5:
 `failed` when the LLM output was invalid after one retry. The LLM client records
 the agent_runs row (hard rule 9).
 
-Dev CLI (from api/):  uv run python -m agents.scout --seed [--only 001,005] [--db] [--json out.json]
+Dev CLI (from api/):  uv run python -m api.agents.scout --seed [--only 001,005] [--db] [--json out.json]
+(`python -m agents.scout` is the same module; `api.` resolves through the api/api alias package.)
 """
 
 import argparse
@@ -499,7 +500,7 @@ def run_seed_db(client_factory: Callable[[Callable], LLMClient], seed_dir: Path,
 def main(argv: list[str] | None = None) -> int:
     from config import get_settings
 
-    ap = argparse.ArgumentParser(prog="python -m agents.scout", description="Run Scout over the seed notices.")
+    ap = argparse.ArgumentParser(prog="python -m api.agents.scout", description="Run Scout over the seed notices.")
     ap.add_argument("--seed", action="store_true", required=True, help="use data/seed_tenders (the only source for now)")
     ap.add_argument("--only", help="comma-separated seed ids, e.g. 001,005")
     ap.add_argument("--db", action="store_true", help="upsert into DATABASE_URL, write tenders rows + agent_runs")
