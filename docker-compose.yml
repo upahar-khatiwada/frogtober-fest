@@ -33,6 +33,8 @@ services:
     volumes:
       # Synthetic seed tenders for POST /tenders/scrape (data/ is outside the api build context).
       - ./data/seed_tenders:/data/seed_tenders:ro
+      # Demo company for `docker compose exec api python -m scripts.seed_demo --data-dir /data/demo_company`.
+      - ./data/demo_company:/data/demo_company:ro
       - ./data/demo_cache:/data/demo_cache:ro
     depends_on:
       db:

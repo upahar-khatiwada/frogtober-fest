@@ -155,6 +155,19 @@ build time.
 
 ### 4. Load the demo data
 
+With the full Docker stack running, seed the demo company inside the api container.
+Analyze returns "no company profile" until you do:
+
+```bash
+docker compose exec api python -m scripts.seed_demo --data-dir /data/demo_company
+```
+
+If a native Postgres also listens on port 5432 (common on Windows), `localhost:5432`
+from the host reaches it instead of the Compose `db`, and a host-side seed fails with
+"password authentication failed". Use the in-container command above.
+
+From the host:
+
 ```bash
 cd api
 
