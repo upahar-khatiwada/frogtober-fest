@@ -73,31 +73,24 @@ def test_match_decision_is_deterministic():
 
 def test_compliance_report_blocks_on_hard_failure():
     assessment = ComplianceAssessment.model_validate_json(
-        json.dumps(
-            {
-                "items": [
-                    {
-                        "requirement": "Class D licence",
-                        "status": "pass",
-                        "severity": "hard",
-                        "evidence_chunk_ids": [12],
-                        "evidence_quote": "Class C construction licence no. 1234",
-                    },
-                    {"requirement": "Tax clearance 2082/83", "status": "unclear", "severity": "hard"},
-                ]
-            }
-        ),
+        json.dumps({"status": "pass", "evidence_chunk_ids": [12], "evidence_quote": "Class C construction licence no. 1234",
+                    "explanation": "The licence is class C, above D."}),
         strict=True,
     )
+    model_item = ComplianceItem(requirement="Class D licence", severity="hard", source="model",
+                                **assessment.model_dump(exclude={"explanation"}))
     deadline_rule = ComplianceItem(
         requirement="Submission deadline not passed",
         status="fail",
         severity="hard",
+        source="rule",
         rule_id="NP-DEADLINE",
     )
-    report = ComplianceReport(items=[*map(lambda f: ComplianceItem(**f.model_dump()), assessment.items), deadline_rule])
+    soft = ComplianceItem(requirement="Performance security", status="fail", severity="soft", source="rule", rule_id="NP-X")
+    report = ComplianceReport(items=[model_item, deadline_rule, soft])
     assert report.is_blocked
     assert report.hard_failures == [deadline_rule]
+    assert not ComplianceReport(items=[model_item, soft]).is_blocked
 
 
 def test_proposal_section_and_review_parse():
@@ -175,15 +168,29 @@ def test_contractor_class_rejects_bad_value():
 
 def test_llm_pass_without_chunk_id_is_rejected():
     """Hard rule 8: evidence without a chunk id must be 'unclear', never 'pass'."""
-    with pytest.raises(ValidationError):
-        ComplianceAssessment.model_validate({"items": [{"requirement": "PAN", "status": "pass", "severity": "hard"}]})
+    for status in ("pass", "fail"):  # a decision either way needs a cited chunk
+        with pytest.raises(ValidationError):
+            ComplianceAssessment.model_validate({"status": status, "explanation": "PAN certificate seen"})
+    assert ComplianceAssessment.model_validate({"status": "unclear", "explanation": "nothing in the KB"})
+    with pytest.raises(ValidationError):  # code-built items: a pass needs a chunk or a document record
+        ComplianceItem(requirement="PAN", status="pass", severity="hard", source="model")
+    with pytest.raises(ValidationError):  # a rule may cite the notice, but not a profile field, on its own
+        ComplianceItem(requirement="JV", status="pass", severity="soft", source="rule", rule_id="NP-JV",
+                       evidence_ref="company.jv_partners")
+    assert ComplianceItem(requirement="Deadline", status="pass", severity="hard", source="rule", rule_id="NP-DEADLINE",
+                          evidence_ref="tender.deadline")
+    assert ComplianceItem(requirement="PAN", status="pass", severity="hard", source="rule", rule_id="NP-PAN-VAT",
+                          evidence_document_ids=[2])
 
 
-def test_llm_cannot_claim_a_rule_id():
-    with pytest.raises(ValidationError):
-        ComplianceAssessment.model_validate(
-            {"items": [{"requirement": "PAN", "status": "pass", "severity": "hard", "rule_id": "NP-PAN"}]}
-        )
+def test_llm_cannot_claim_a_rule_id_or_choose_severity():
+    base = {"status": "pass", "evidence_chunk_ids": [1], "evidence_quote": "PAN 999", "explanation": "PAN seen"}
+    assert ComplianceAssessment.model_validate(base)
+    for extra in ({"rule_id": "NP-PAN"}, {"severity": "soft"}, {"requirement": "PAN"}):
+        with pytest.raises(ValidationError):
+            ComplianceAssessment.model_validate(base | extra)
+    with pytest.raises(ValidationError):  # and a model item cannot carry one either
+        ComplianceItem(requirement="PAN", status="unclear", severity="hard", source="model", rule_id="NP-PAN")
 
 
 def test_proposal_section_must_cite_chunks():

@@ -71,7 +71,7 @@ def test_rules_file_is_well_formed():
 def test_baseline_all_pass(tender, company, docs):
     res = run(tender, company, docs)
     assert {k: v.status.value for k, v in res.items()} == {
-        "NP-DEADLINE": "pass", "NP-REG-DOCS": "pass", "NP-PAN-VAT": "pass", "NP-TAX-CLEARANCE": "pass",
+        "NP-DEADLINE": "pass", "NP-REG-DOCS": "pass", "NP-BID-FORMS": "pass", "NP-PAN-VAT": "pass", "NP-TAX-CLEARANCE": "pass",
         "NP-LICENCE-RENEWAL": "pass", "NP-TURNOVER": "pass", "NP-EXPERIENCE": "pass", "NP-BID-SECURITY": "pass",
         "NP-PERF-SECURITY": "unclear",
     }
@@ -110,9 +110,18 @@ def test_reg_docs(tender, company, docs):
     assert st(run(tender, company, without(docs, T.BUSINESS_LICENCE)), "NP-REG-DOCS") == "fail"
     expired = [d.model_copy(update={"expiry": date(2026, 11, 1)}) if d.doc_type is T.COMPANY_REGISTRATION else d for d in docs]
     assert st(run(tender, company, expired), "NP-REG-DOCS") == "fail"
+    res = run(tender, company, without(docs, T.BUSINESS_LICENCE))
+    assert "business/construction licence" in res["NP-REG-DOCS"].action_needed
+
+
+def test_bid_forms_are_never_a_fail(tender, company, docs):
+    """Self-declaration / power of attorney are signed per bid: missing from the KB is unclear + an action, not a block."""
+    res = run(tender, company, without(docs, T.SELF_DECLARATION))
+    assert st(res, "NP-BID-FORMS") == "unclear" and "Prepare and sign the self-declaration" in res["NP-BID-FORMS"].action_needed
+    assert st(res, "NP-REG-DOCS") == "pass"
     tender.required_docs.append(RequiredDoc(doc_type=T.POWER_OF_ATTORNEY, description="Power of attorney"))
-    assert st(run(tender, company, docs), "NP-REG-DOCS") == "fail"
-    assert st(run(tender, company, [*docs, D(T.POWER_OF_ATTORNEY, 20)]), "NP-REG-DOCS") == "pass"
+    items = [i for i in evaluate_rules(tender, company, docs, criteria=CRITERIA, now=NOW) if i.rule_id == "NP-BID-FORMS"]
+    assert [(i.requirement.split(" (")[0], i.status.value) for i in items] == [("Self-declaration", "pass"), ("Power of attorney", "unclear")]
 
 
 def test_pan_vat(tender, company, docs):
@@ -233,7 +242,10 @@ def test_jv(tender, company, docs):
     assert "NP-JV" not in run(tender, company, docs)  # nothing failed
     company.turnover = [AnnualTurnover(fiscal_year_bs=fy, amount_npr=10_000_000) for fy in ("2080/81", "2081/82", "2082/83")]
     res = run(tender, company, docs)
-    assert st(res, "NP-TURNOVER") == "fail" and st(res, "NP-JV") == "pass"
+    assert st(res, "NP-TURNOVER") == "fail" and st(res, "NP-JV") == "unclear"  # partner on profile only: no evidence
+    assert "Sign a JV agreement with Sagarmatha Engineering" in res["NP-JV"].action_needed
+    res = run(tender, company, [*docs, D(T.JV_AGREEMENT, 30, document_id=30)])
+    assert st(res, "NP-JV") == "pass" and res["NP-JV"].evidence_document_ids == [30] and res["NP-JV"].action_needed is None
     company.jv_partners = []
     assert st(run(tender, company, docs), "NP-JV") == "fail"
     company.jv_partners = [JVPartner(name="X")]
@@ -252,3 +264,56 @@ def test_domestic_preference(tender, company, docs):
 def test_naive_now_rejected(tender, company, docs):
     with pytest.raises(ValueError):
         evaluate_rules(tender, company, docs, now=datetime(2026, 10, 17))
+
+# --- expiry vs deadline and bid validity / actions / evidence (Prompt 7) ------------------
+
+def test_tax_clearance_expired_document_is_hard_fail_with_action(tender, company, docs):
+    """The demo case: only an FY 2081/82 clearance on file, expired before the deadline; the notice asks for 2082/83."""
+    old = [d.model_copy(update={"fiscal_year_bs": "2081/82", "expiry": date(2026, 7, 16), "document_id": 3})
+           if d.doc_type is T.TAX_CLEARANCE else d for d in docs]
+    item = run(tender, company, old)["NP-TAX-CLEARANCE"]
+    assert (item.status.value, item.severity.value) == ("fail", "hard")
+    assert "F/Y 2081/82 (expired 2026-07-16)" in item.explanation and item.evidence_document_ids == [3]
+    assert item.action_needed.startswith("Renew tax clearance for F/Y 2082/83")
+    # Right FY, but expired before the deadline: still a hard fail.
+    tender.required_docs[2].fiscal_year_bs = "2081/82"
+    item = run(tender, company, old)["NP-TAX-CLEARANCE"]
+    assert item.status.value == "fail" and "expired on 2026-07-16" in item.explanation
+
+
+def test_document_lapsing_during_bid_validity(tender, company, docs):
+    """Deadline 2026-11-20 + 90 days bid validity = 2027-02-18."""
+    lapsing = [d.model_copy(update={"expiry": date(2027, 1, 10), "document_id": 1}) if d.doc_type is T.COMPANY_REGISTRATION
+               else d for d in docs]
+    res = run(tender, company, lapsing)
+    item = res["NP-DOC-VALIDITY"]
+    assert (item.status.value, item.severity.value) == ("unclear", "soft") and item.evidence_document_ids == [1]
+    assert "Renew the company registration certificate before 2027-01-10" in item.action_needed
+    assert st(res, "NP-REG-DOCS") == "pass"  # valid at the deadline
+    ok = [d.model_copy(update={"expiry": date(2027, 7, 16)}) if d.doc_type is T.COMPANY_REGISTRATION else d for d in docs]
+    assert st(run(tender, company, ok), "NP-DOC-VALIDITY") == "pass"
+    tender.bid_validity_days = None
+    assert "NP-DOC-VALIDITY" not in run(tender, company, lapsing)
+    assert "NP-DOC-VALIDITY" not in run(tender, company, docs)  # no dated eligibility documents
+
+
+def test_other_notice_documents_are_listed_not_judged(tender, company, docs):
+    tender.required_docs.append(RequiredDoc(doc_type=T.OTHER, description="Bid document fee payment voucher"))
+    item = run(tender, company, docs)["NP-OTHER-DOCS"]
+    assert item.status.value == "unclear" and "payment voucher" in item.action_needed
+
+
+def test_every_non_pass_rule_item_has_an_action(tender, company, docs):
+    stripped = [d.model_copy(update={"chunk_id": None}) for d in docs]
+    company.turnover = [AnnualTurnover(fiscal_year_bs="2082/83", amount_npr=1)]
+    tender.domestic_preference = True
+    for item in evaluate_rules(tender, company, stripped, criteria=CRITERIA, now=NOW):
+        assert item.source.value == "rule"
+        assert (item.action_needed is None) == (item.status.value == "pass"), item.rule_id
+
+
+def test_profile_alone_is_not_evidence_for_licence(tender, company, docs):
+    res = run(tender, company, without(docs, T.LICENCE_RENEWAL, T.BUSINESS_LICENCE))
+    assert st(res, "NP-LICENCE-RENEWAL") == "unclear" and "Upload the construction licence" in res["NP-LICENCE-RENEWAL"].action_needed
+    licence = D(T.BUSINESS_LICENCE, 40, fiscal_year_bs="2083/84")
+    assert st(run(tender, company, [*without(docs, T.LICENCE_RENEWAL), licence]), "NP-LICENCE-RENEWAL") == "pass"

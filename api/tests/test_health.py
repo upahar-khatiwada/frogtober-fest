@@ -12,10 +12,9 @@ def test_health_ok():
 
 def test_openapi_exposes_stage_contracts():
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
-    for name in ("TenderRecord", "TenderDetail", "CompanyProfile", "MatchResult", "ComplianceReport",
+    for name in ("TenderRecord", "TenderDetail", "CompanyProfile", "MatchResult", "ComplianceView", "ComplianceItem",
+                 "ComplianceOverrideRequest",
                  "Proposal", "ProposalSection", "ReviewReport", "AgentRun"):
         assert name in schemas
 
-
-def test_stub_routes_still_return_501():
-    assert client.post("/tenders/1/proposal").status_code == 501
+# The proposal route (still 501 behind the compliance gate) is tested with a DB in tests/test_compliance_api.py.

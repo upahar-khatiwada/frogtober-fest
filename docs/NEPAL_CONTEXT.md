@@ -225,7 +225,8 @@ The Pydantic contracts encode these Nepal facts as enums. The JSON schema the LL
 | Rule id | Check | Basis in this doc | Verified | Severity |
 |---|---|---|---|---|
 | NP-DEADLINE | deadline not passed (NPT) | PPA s.14, hard rule 5 | yes | hard |
-| NP-REG-DOCS | registration, business licence, self-declaration (+ power of attorney if the notice lists it) on file, unexpired | PPR-EN Rule 40(2)(a),(b),(e) | yes (2008 text) | hard |
+| NP-REG-DOCS | registration and business/construction licence on file, unexpired at the deadline | PPR-EN Rule 40(2)(a),(b) | yes (2008 text) | hard |
+| NP-BID-FORMS | self-declaration (+ power of attorney if the notice lists it): signed per bid, so never a fail; pass only if a signed copy is in the KB (Prompt 7) | PPR-EN Rule 40(2)(e) | yes | hard (unclear never blocks) |
 | NP-PAN-VAT | PAN on profile + pan_vat doc; number format NOT validated | Rule 40(2)(c); section 10 item 11 | yes (presence only) | hard |
 | NP-TAX-CLEARANCE | clearance or tax-return proof for the notice's FY | Rule 40(2)(d), real notices (section 3) | yes | hard |
 | NP-LICENCE-RENEWAL | construction licence renewed for the deadline's FY (works only) | section 3, Construction Business Act reported secondhand | NO [VERIFY] | soft |
@@ -235,8 +236,34 @@ The Pydantic contracts encode these Nepal facts as enums. The JSON schema the LL
 | NP-PERF-SECURITY | amount from the notice's percent; never pass | Rule 110(2) | yes | soft |
 | NP-JV | JV route exists if turnover/experience failed; pooling (28(4)) not evaluated | Rule 28 | yes | soft |
 | NP-DOMESTIC-PREF | flag only, no percentage applied | Rules 17, 64(4) [VERIFY] | NO | soft |
+| NP-DOC-VALIDITY | dated eligibility documents valid at the deadline but lapsing before deadline + bid validity days: unclear + "renew before" action, never fail (Prompt 7) | PPA s.20 (validity counted from the deadline); whether documents must stay valid that long is [VERIFY] | NO | soft |
+| NP-OTHER-DOCS | mandatory notice documents no other rule checked (type `other`, or a tracked type whose rule did not fire): listed with an action, never fail. Runs last (Prompt 7) | PPR-EN Rule 40(2)(f) | yes | soft |
 
 Assumptions (unverified): security validity counts from the submission deadline; turnover window is the N most recent completed FYs before the deadline's FY; date-only deadlines mean end of day NPT.
+
+**Evidence (Prompt 7).** A rule `pass` needs a readable KB document (its first chunk id; the `documents` row id is kept in `evidence_document_ids`) or a field of the notice itself (`tender.*`, e.g. the deadline). A company-profile entry alone (licence renewal FY, JV partner) is not evidence, so NP-LICENCE-RENEWAL and NP-JV are `unclear` until the licence copy / JV agreement is uploaded. Every non-pass item carries a plain-language `action_needed` (e.g. "Renew tax clearance for F/Y 2082/83 ... before submission").
+
+**What fired on the demo (Prompt 7, oracle records of seeds 001 and 002, demo KB with the new `06_construction_licence.txt`, clock 2026-10-19 12:00 NPT, rules only):**
+
+| Rule | 001 Bhanu road (strong match) | 002 Seti river training (hard fail) |
+|---|---|---|
+| NP-DEADLINE | pass | pass |
+| NP-REG-DOCS | pass (registration + licence copy) | pass |
+| NP-BID-FORMS | unclear (sign self-declaration) | unclear |
+| NP-PAN-VAT | pass | pass |
+| NP-TAX-CLEARANCE | **fail, hard**: needs F/Y 2082/83; only F/Y 2081/82 on file, expired 2026-07-16 | **fail, hard** (same) |
+| NP-LICENCE-RENEWAL | pass (licence copy recorded for F/Y 2083/84) | pass |
+| NP-TURNOVER | unclear (look-back "best 3 of 5" not extracted; no audit reports) | **fail, hard**: avg Rs 5.03 crore < Rs 25 crore |
+| NP-EXPERIENCE | unclear (certificate not classified as similar) | **fail, hard**: no Rs 9 crore similar contract |
+| NP-BID-SECURITY | unclear (arrange Rs 4,46,000 guarantee) | unclear (Rs 55,50,000) |
+| NP-PERF-SECURITY | - | unclear (5%) |
+| NP-JV | - (nothing failed) | fail, soft: JV barred |
+| NP-DOC-VALIDITY | pass (registration/licence valid to 2027-07-16 > 2027-02-19) | pass |
+| NP-DOMESTIC-PREF, NP-OTHER-DOCS | - | - |
+
+Both tenders are `blocked`. 001 is blocked only by the expired tax clearance (the demo beat: upload an FY 2082/83 clearance, or override). On all 7 labelled seeds NP-TAX-CLEARANCE is the shared hard fail, because every current notice asks for FY 2082/83.
+
+Licence classes for the model layer: क = A, ख = B, ग = C, घ = D (A highest). This ordering is used only in the Compliance prompt; per-class value limits are still not encoded (§3 [VERIFY]).
 ## 13. Scout parsing conventions (as implemented, Prompt 5b)
 
 The Scout LLM copies strings verbatim (`schemas/scout.py::TenderExtraction`). Everything below is deterministic code in `api/nepal/` and `api/agents/scout.py`. When a rule cannot decide, the value is **null**, the raw string is kept, and `needs_review` is set. Nothing is guessed.

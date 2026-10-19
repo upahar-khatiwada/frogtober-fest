@@ -1,8 +1,9 @@
 """Tender endpoints (spec section 10.2).
 
-Implemented: POST /tenders/scrape, GET /tenders (ranked, filtered), GET /tenders/{id},
-POST /tenders/{id}/analyze (Matching; Compliance once it lands). The proposal route is a
-stub that declares its response model so the OpenAPI schema (web/'s `gen:api`) carries it.
+Implemented: POST /tenders/scrape, GET /tenders (ranked, filtered), GET /tenders/{id} (with the
+compliance section), POST /tenders/{id}/analyze (Matching, then Compliance if pursued) and
+POST /tenders/{id}/compliance/override. The proposal route enforces the compliance gate (409 while
+blocked) and is otherwise still a 501 stub that declares its response model for the OpenAPI schema.
 """
 
 from datetime import datetime, time, timedelta
@@ -14,8 +15,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from agents.compliance import compliance_view, override_block, proposal_allowed
 from config import Settings
-from db.models import Match, Tender
+from db.models import ComplianceItemRow, Match, Tender
 from deps import get_kankai_fetcher, get_llm_client, get_now, get_seed_dir, get_session, get_settings
 from ingest.notices import upsert_notices
 from ingest.scraper import PoliteFetcher, scrape_kankai
@@ -24,7 +26,7 @@ from nepal.dates import NPT, ad_to_bs, days_left, format_bs
 from nepal.geography import normalize_location
 from pipeline import orchestrator
 from pipeline.llm import LLMClient
-from schemas import (BuyerLevel, DeadlineView, MatchDecision, MatchResult, NoticeLanguage, ProcurementMethod, ProcurementType,
+from schemas import (BuyerLevel, ComplianceOverrideRequest, DeadlineView, MatchDecision, MatchResult, NoticeLanguage, ProcurementMethod, ProcurementType,
                      Proposal, Province, ScrapeReport, ScrapeRequest, SkippedNotice, TenderDetail, TenderListItem,
                      TenderRecord, TenderSource, TenderStatus)
 
@@ -93,7 +95,7 @@ def _match_of(session: Session, tender_id: int) -> Match | None:
     return session.scalars(select(Match).where(Match.tender_id == tender_id).order_by(Match.id.desc()).limit(1)).first()
 
 
-def _detail(tender: Tender, match: Match | None, now: datetime) -> TenderDetail:
+def _detail(session: Session, tender: Tender, match: Match | None, now: datetime) -> TenderDetail:
     return TenderDetail(
         id=tender.id,
         source_url=tender.source_url,
@@ -102,10 +104,11 @@ def _detail(tender: Tender, match: Match | None, now: datetime) -> TenderDetail:
         deadline_view=deadline_view(tender.deadline, now),
         record=TenderRecord.model_validate(tender.record_json) if tender.record_json else None,
         match=MatchResult.model_validate(match.reasons) if match else None,
+        compliance=compliance_view(session, tender.id),
     )
 
 
-def _list_item(rank: int, tender: Tender, match: Match | None, now: datetime) -> TenderListItem:
+def _list_item(rank: int, tender: Tender, match: Match | None, now: datetime, hard: int | None) -> TenderListItem:
     record = tender.record_json or {}
     first_line = (tender.raw_text or "").strip().split("\n", 1)[0][:200]
     return TenderListItem(
@@ -125,6 +128,7 @@ def _list_item(rank: int, tender: Tender, match: Match | None, now: datetime) ->
         score=match.score if match else None,
         decision=MatchDecision(match.decision) if match else None,
         reasons=list(match.reasons.get("reasons", [])) if match else [],
+        hard_failures=hard,
         needs_review=bool(record.get("needs_review", False)),
         source_url=tender.source_url,
     )
@@ -150,7 +154,11 @@ def list_tenders(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[TenderListItem]:
     """Ranked list: match score (high first), then deadline (soonest first). Unscored tenders come last."""
-    stmt = select(Tender, Match).outerjoin(Match, Match.tender_id == Tender.id)
+    hard = (select(ComplianceItemRow.tender_id,
+                   func.count().filter(ComplianceItemRow.status == "fail", ComplianceItemRow.severity == "hard").label("hard"))
+            .group_by(ComplianceItemRow.tender_id).subquery())
+    stmt = (select(Tender, Match, hard.c.hard).outerjoin(Match, Match.tender_id == Tender.id)
+            .outerjoin(hard, hard.c.tender_id == Tender.id))
     if procurement_type:
         stmt = stmt.where(Tender.procurement_type == procurement_type.value)
     if method:
@@ -176,7 +184,7 @@ def list_tenders(
         stmt = stmt.where(Tender.status == status_.value)
     stmt = stmt.order_by(Match.score.desc().nulls_last(), Tender.deadline.asc().nulls_last(), Tender.id)
     rows = session.execute(stmt.limit(limit).offset(offset)).all()
-    return [_list_item(rank, tender, match, now) for rank, (tender, match) in enumerate(rows, start=offset + 1)]
+    return [_list_item(rank, tender, match, now, n_hard) for rank, (tender, match, n_hard) in enumerate(rows, start=offset + 1)]
 
 
 @router.get("/{tender_id}", responses={status.HTTP_404_NOT_FOUND: {"description": "No such tender"}})
@@ -185,18 +193,18 @@ def get_tender(
     session: Annotated[Session, Depends(get_session)],
     now: Annotated[datetime, Depends(get_now)],
 ) -> TenderDetail:
-    """Tender detail and match result (the compliance report lands with the Compliance agent)."""
+    """Tender detail: record, match result and the compliance section (items, hard failures, override)."""
     tender = session.get(Tender, tender_id)
     if tender is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No tender {tender_id}")
-    return _detail(tender, _match_of(session, tender_id), now)
+    return _detail(session, tender, _match_of(session, tender_id), now)
 
 
 @router.post(
     "/{tender_id}/analyze",
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "No such tender"},
-        status.HTTP_409_CONFLICT: {"description": "Not extracted yet, already past Matching, or no company profile"},
+        status.HTTP_409_CONFLICT: {"description": "Not extracted yet, already past Compliance, or no company profile"},
     },
 )
 def analyze_tender(
@@ -206,7 +214,11 @@ def analyze_tender(
     settings: Annotated[Settings, Depends(get_settings)],
     now: Annotated[datetime, Depends(get_now)],
 ) -> TenderDetail:
-    """Run Matching, then Compliance if pursued. A model failure returns the tender with status `failed`."""
+    """Run Matching, then Compliance if pursued: status becomes skipped, checked or blocked.
+
+    A model failure returns the tender with status `failed`. Re-running on a checked/blocked tender (e.g. after
+    uploading a renewed document) re-checks it; an earlier override still holds only if it covers every new hard failure.
+    """
     tender = session.get(Tender, tender_id)
     if tender is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No tender {tender_id}")
@@ -214,10 +226,48 @@ def analyze_tender(
         orchestrator.analyze_tender(session, client, tender, settings=settings, now=now)
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    return _detail(tender, _match_of(session, tender_id), now)
+    return _detail(session, tender, _match_of(session, tender_id), now)
 
 
-@router.post("/{tender_id}/proposal", responses=_501)
-def generate_proposal(tender_id: int) -> Proposal:
-    """Run Proposal and Review."""
+@router.post(
+    "/{tender_id}/compliance/override",
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "No such tender"},
+        status.HTTP_409_CONFLICT: {"description": "Tender is not blocked"},
+    },
+)
+def override_compliance(
+    tender_id: int,
+    body: ComplianceOverrideRequest,
+    session: Annotated[Session, Depends(get_session)],
+    now: Annotated[datetime, Depends(get_now)],
+) -> TenderDetail:
+    """A named person accepts the current hard failures and unblocks the tender (status `checked`).
+
+    Stored with who, when, why and which failures. The failures stay on the report; a re-check that finds a new
+    hard failure blocks the tender again.
+    """
+    tender = session.get(Tender, tender_id)
+    if tender is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No tender {tender_id}")
+    try:
+        override_block(session, tender, overridden_by=body.overridden_by, reason=body.reason)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return _detail(session, tender, _match_of(session, tender_id), now)
+
+
+@router.post(
+    "/{tender_id}/proposal",
+    responses={**_501, status.HTTP_404_NOT_FOUND: {"description": "No such tender"},
+               status.HTTP_409_CONFLICT: {"description": "Blocked by hard compliance failures (no override), or not checked"}},
+)
+def generate_proposal(tender_id: int, session: Annotated[Session, Depends(get_session)]) -> Proposal:
+    """Run Proposal and Review. Refused (409) while hard compliance failures are not overridden."""
+    tender = session.get(Tender, tender_id)
+    if tender is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No tender {tender_id}")
+    allowed, why = proposal_allowed(session, tender)
+    if not allowed:
+        raise HTTPException(status.HTTP_409_CONFLICT, why.replace("{id}", str(tender_id)))
     raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, _NOT_IMPLEMENTED)

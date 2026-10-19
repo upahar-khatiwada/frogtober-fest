@@ -72,3 +72,21 @@ def test_real_ollama_matching_on_seed_001_and_003():
                   for nid in ("001", "003")}
     assert all(r.ok and r.stage is Stage.MATCHING for r in runs)
     assert scores["001"] > scores["003"]
+
+
+def test_real_ollama_compliance_on_seed_001():
+    """Compliance on the demo KB: the grammar accepts ComplianceAssessment, the expired clearance still blocks
+    (a rule, not the model), and every model pass is backed by a chunk the code verified."""
+    from scripts.score_compliance import demo_kb, make_retriever
+    from tests.test_compliance import COMPANY, NOW, golden_record
+
+    from agents.compliance import check_requirements
+
+    kb = demo_kb()
+    with LLMClient(lambda _run: None) as client:
+        report = check_requirements(golden_record("001"), COMPANY, kb.documents, client=client,
+                                    retrieve_fn=make_retriever(kb, client, 4), now=NOW)
+    assert report.is_blocked and any(i.rule_id == "NP-TAX-CLEARANCE" for i in report.hard_failures)
+    for item in report.items:
+        if item.source.value == "model" and item.status.value != "unclear":
+            assert item.evidence_chunk_ids and item.evidence_quote

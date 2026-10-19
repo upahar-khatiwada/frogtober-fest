@@ -17,12 +17,24 @@ rules:
     applies_to: {procurement_types: [], methods: []}
     check: required_documents_present
     parameters:
-      statutory_doc_types: [company_registration, business_licence, self_declaration]
+      statutory_doc_types: [company_registration, business_licence]
+      also_from_notice: []
+    severity: hard
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: true
+    notes: PPR-EN Rule 40(2)(a),(b) from the 2008 text. The self-declaration (e) and power of attorney are per-bid forms, see NP-BID-FORMS.
+
+  - id: NP-BID-FORMS
+    description: Forms signed for each bid (self-declaration; power of attorney if the notice lists it). Never a fail, since they are not KB documents.
+    applies_to: {procurement_types: [], methods: []}
+    check: bid_forms
+    parameters:
+      statutory_doc_types: [self_declaration]
       also_from_notice: [power_of_attorney]
     severity: hard
     source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
     verified: true
-    notes: PPR-EN Rule 40(2)(a),(b),(e) from the 2008 text; the notice may add documents.
+    notes: PPR-EN Rule 40(2)(e). Pass only if a signed copy is in the KB; otherwise unclear with an action to prepare it.
 
   - id: NP-PAN-VAT
     description: PAN on company profile and PAN/VAT certificate on file.
@@ -113,3 +125,25 @@ rules:
     source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
     verified: false
     notes: Rule 17 (10%) and Rule 64(4) [VERIFY]. No percentage is applied.
+
+  - id: NP-DOC-VALIDITY
+    description: Eligibility documents valid at the deadline stay valid through the notice's bid validity period.
+    applies_to: {procurement_types: [], methods: []}
+    check: documents_valid_through_bid_validity
+    parameters:
+      doc_types: [company_registration, business_licence, licence_renewal, pan_vat, tax_clearance, tax_return]
+      exclude: [bid_security, jv_agreement, self_declaration, power_of_attorney]
+    severity: soft
+    source: https://nepallaws.com/Laws/public-procurement-act-2063/chapter-3-provisions-relating-to-bid/section-20-validity-period-of-bid/
+    verified: false
+    notes: Whether eligibility documents must stay valid for the whole bid validity period is not confirmed [VERIFY]; so a lapse is unclear + an action, never a fail. Bid validity is counted from the submission deadline (PPA s.20). Bid security has its own validity (NP-BID-SECURITY).
+
+  - id: NP-OTHER-DOCS
+    description: Mandatory documents the notice lists that no other rule checked (listed so nothing is dropped).
+    applies_to: {procurement_types: [], methods: []}
+    check: other_notice_documents
+    parameters: {}
+    severity: soft
+    source: https://www.fsmtoolbox.com/assets/pdf/32._Public-procurement-rule-2064.pdf
+    verified: true
+    notes: PPR-EN Rule 40(2)(f) lets the entity ask for other documents. Must stay LAST (it reads which rules fired). Never a fail.

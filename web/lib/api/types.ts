@@ -56,7 +56,7 @@ export interface paths {
         };
         /**
          * Get Tender
-         * @description Tender detail and match result (the compliance report lands with the Compliance agent).
+         * @description Tender detail: record, match result and the compliance section (items, hard failures, override).
          */
         get: operations["get_tender_tenders__tender_id__get"];
         put?: never;
@@ -78,9 +78,35 @@ export interface paths {
         put?: never;
         /**
          * Analyze Tender
-         * @description Run Matching, then Compliance if pursued. A model failure returns the tender with status `failed`.
+         * @description Run Matching, then Compliance if pursued: status becomes skipped, checked or blocked.
+         *
+         *     A model failure returns the tender with status `failed`. Re-running on a checked/blocked tender (e.g. after
+         *     uploading a renewed document) re-checks it; an earlier override still holds only if it covers every new hard failure.
          */
         post: operations["analyze_tender_tenders__tender_id__analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenders/{tender_id}/compliance/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Override Compliance
+         * @description A named person accepts the current hard failures and unblocks the tender (status `checked`).
+         *
+         *     Stored with who, when, why and which failures. The failures stay on the report; a re-check that finds a new
+         *     hard failure blocks the tender again.
+         */
+        post: operations["override_compliance_tenders__tender_id__compliance_override_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -98,7 +124,7 @@ export interface paths {
         put?: never;
         /**
          * Generate Proposal
-         * @description Run Proposal and Review.
+         * @description Run Proposal and Review. Refused (409) while hard compliance failures are not overridden.
          */
         post: operations["generate_proposal_tenders__tender_id__proposal_post"];
         delete?: never;
@@ -471,43 +497,119 @@ export interface components {
              */
             updated_at: string;
         };
-        /** ComplianceItem */
+        /**
+         * ComplianceItem
+         * @description One checklist line, built by code (from a rule, or from a validated ComplianceAssessment).
+         */
         ComplianceItem: {
             /** Requirement */
             requirement: string;
             status: components["schemas"]["ComplianceStatus"];
             severity: components["schemas"]["Severity"];
+            source: components["schemas"]["ItemSource"];
+            /**
+             * Rule Id
+             * @description Id of the deterministic Nepal rule that produced this item, if any.
+             */
+            rule_id?: string | null;
             /**
              * Evidence Chunk Ids
              * @description kb_chunks.id values backing the status.
              */
             evidence_chunk_ids?: number[];
             /**
+             * Evidence Document Ids
+             * @description documents.id records backing the status.
+             */
+            evidence_document_ids?: number[];
+            /**
+             * Evidence Ref
+             * @description A tender-notice field a rule relied on, e.g. "tender.deadline_ad".
+             */
+            evidence_ref?: string | null;
+            /**
              * Evidence Quote
-             * @description Verbatim text from the cited chunk.
+             * @description Verbatim text from the cited chunk (model items).
              */
             evidence_quote?: string | null;
             /** Explanation */
             explanation?: string | null;
             /**
-             * Rule Id
-             * @description Id of the deterministic Nepal rule that produced this item, if any.
+             * Action Needed
+             * @description What the bidder must do, in plain language. Null when nothing.
              */
-            rule_id?: string | null;
+            action_needed?: string | null;
+            /**
+             * Requirement Index
+             * @description Index into TenderRecord.requirements (model items).
+             */
+            requirement_index?: number | null;
+        };
+        /** ComplianceOverride */
+        ComplianceOverride: {
+            /** Id */
+            id: number;
+            /** Overridden By */
+            overridden_by: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Overridden At
+             * Format: date-time
+             */
+            overridden_at: string;
+            /**
+             * Hard Failures
+             * @description ComplianceItem.key of every hard failure the person accepted.
+             */
+            hard_failures: string[];
+            /**
+             * Active
+             * @description True while the current report's hard failures are all among those accepted.
+             */
+            active: boolean;
         };
         /**
-         * ComplianceReport
-         * @description LLM findings plus rule-generated items. Stored per tender.
+         * ComplianceOverrideRequest
+         * @description POST /tenders/{id}/compliance/override: a named person accepts the hard failures and unblocks the tender.
          */
-        ComplianceReport: {
-            /** Items */
-            items: components["schemas"]["ComplianceItem"][];
+        ComplianceOverrideRequest: {
+            /**
+             * Overridden By
+             * @description Who takes responsibility (no auth in the MVP).
+             */
+            overridden_by: string;
+            /** Reason */
+            reason: string;
         };
         /**
          * ComplianceStatus
          * @enum {string}
          */
         ComplianceStatus: "pass" | "fail" | "unclear";
+        /**
+         * ComplianceView
+         * @description The compliance section of GET /tenders/{id}.
+         */
+        ComplianceView: {
+            /** Items */
+            items: components["schemas"]["ComplianceItem"][];
+            /** @description Latest override, active or not. */
+            override?: components["schemas"]["ComplianceOverride"] | null;
+            /** Blocked */
+            readonly blocked: boolean;
+            /** Hard Failures */
+            readonly hard_failures: number;
+            /** Counts */
+            readonly counts: {
+                [key: string]: number;
+            };
+            /**
+             * Proposal Allowed
+             * @description No hard failure, or an active override (CLAUDE.md: blocked -> no proposal unless overridden).
+             */
+            readonly proposal_allowed: boolean;
+        };
         /**
          * ContractorClass
          * @enum {string}
@@ -637,6 +739,12 @@ export interface components {
          * @enum {string}
          */
         IngestStatus: "pending" | "processing" | "ready" | "needs_ocr" | "failed";
+        /**
+         * ItemSource
+         * @description Which Compliance layer produced an item: a deterministic Nepal rule, or the model's KB judgement.
+         * @enum {string}
+         */
+        ItemSource: "rule" | "model";
         /** JVPartner */
         JVPartner: {
             /** Name */
@@ -966,7 +1074,8 @@ export interface components {
             deadline_view?: components["schemas"]["DeadlineView"] | null;
             record?: components["schemas"]["TenderRecord"] | null;
             match?: components["schemas"]["MatchResult"] | null;
-            compliance?: components["schemas"]["ComplianceReport"] | null;
+            /** @description Null until Compliance has run. */
+            compliance?: components["schemas"]["ComplianceView"] | null;
         };
         /**
          * TenderListItem
@@ -1000,6 +1109,11 @@ export interface components {
             decision?: components["schemas"]["MatchDecision"] | null;
             /** Reasons */
             reasons?: string[];
+            /**
+             * Hard Failures
+             * @description Hard compliance failures; null until Compliance has run.
+             */
+            hard_failures?: number | null;
             /**
              * Needs Review
              * @default false
@@ -1280,7 +1394,56 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Not extracted yet, already past Matching, or no company profile */
+            /** @description Not extracted yet, already past Compliance, or no company profile */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    override_compliance_tenders__tender_id__compliance_override_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tender_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComplianceOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenderDetail"];
+                };
+            };
+            /** @description No such tender */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Tender is not blocked */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1317,6 +1480,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Proposal"];
                 };
+            };
+            /** @description No such tender */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Blocked by hard compliance failures (no override), or not checked */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

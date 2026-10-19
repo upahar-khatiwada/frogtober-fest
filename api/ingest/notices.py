@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from db.models import ComplianceItemRow, Match, Tender
+from db.models import ComplianceItemRow, ComplianceOverrideRow, Match, Tender
 from ingest.parse_docs import clean_text
 from schemas import TenderStatus
 
@@ -35,7 +35,7 @@ def upsert_notices(session: Session, notices: list[RawNotice]) -> tuple[UpsertCo
     """Insert new notices as `new`; leave identical ones (and their pipeline progress) alone.
 
     A notice whose raw text changed is reset to `new`: Scout output and the match and
-    compliance rows derived from the old text are dropped. Proposals are kept (human work).
+    compliance rows (and overrides) derived from the old text are dropped. Proposals are kept (human work).
     """
     counts, ids = UpsertCounts(), []
     by_url: dict[str, RawNotice] = {}
@@ -58,6 +58,7 @@ def upsert_notices(session: Session, notices: list[RawNotice]) -> tuple[UpsertCo
             tender.updated_at = func.now()
             session.execute(delete(Match).where(Match.tender_id == tender.id))
             session.execute(delete(ComplianceItemRow).where(ComplianceItemRow.tender_id == tender.id))
+            session.execute(delete(ComplianceOverrideRow).where(ComplianceOverrideRow.tender_id == tender.id))
             counts.updated += 1
         session.flush()
         ids.append(tender.id)

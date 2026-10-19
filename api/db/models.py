@@ -34,6 +34,7 @@ from schemas.enums import (
     ComplianceStatus,
     DocType,
     IngestStatus,
+    ItemSource,
     MatchDecision,
     NoticeLanguage,
     ProcurementMethod,
@@ -183,6 +184,7 @@ class ComplianceItemRow(Base):
     __table_args__ = (
         enum_check("status", ComplianceStatus, "ck_compliance_items_status"),
         enum_check("severity", Severity, "ck_compliance_items_severity"),
+        enum_check("source", ItemSource, "ck_compliance_items_source"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -194,6 +196,28 @@ class ComplianceItemRow(Base):
     # Additive: deterministic rule id (nepal/rules.yaml) and the item's explanation.
     rule_id: Mapped[str | None] = mapped_column(Text)
     explanation: Mapped[str | None] = mapped_column(Text)
+    # Additive (0002): which layer made the item, its structured evidence, and what the bidder must do.
+    source: Mapped[str] = mapped_column(Text, server_default=ItemSource.RULE.value)
+    evidence_chunk_ids: Mapped[list[int]] = mapped_column(ARRAY(Integer), server_default="{}")
+    evidence_document_ids: Mapped[list[int]] = mapped_column(ARRAY(Integer), server_default="{}")
+    evidence_ref: Mapped[str | None] = mapped_column(Text)
+    evidence_quote: Mapped[str | None] = mapped_column(Text)
+    action_needed: Mapped[str | None] = mapped_column(Text)
+    requirement_index: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(TS, server_default=func.now())
+
+
+class ComplianceOverrideRow(Base):
+    """A person's explicit decision to proceed despite hard compliance failures (who, when, why, which failures)."""
+
+    __tablename__ = "compliance_overrides"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tender_id: Mapped[int] = mapped_column(ForeignKey("tenders.id", ondelete="CASCADE"), index=True)
+    overridden_by: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(Text)
+    # ComplianceItem.key of each hard failure accepted; a later report with a new hard failure is not covered.
+    hard_failures: Mapped[list[Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(TS, server_default=func.now())
 
 

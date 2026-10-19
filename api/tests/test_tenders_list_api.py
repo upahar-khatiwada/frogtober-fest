@@ -156,11 +156,15 @@ def test_analyze_runs_matching_and_ranks(api, db_session):
     api.holder["llm"] = make_llm(FakeOllama([assessment_json(85)], embed_fn=bag_of_words_vector))
     r1 = api.post(f"/tenders/{good.id}/analyze")
     r2 = api.post(f"/tenders/{off.id}/analyze")
-    assert r1.status_code == 200 and r1.json()["status"] == "matched" and r1.json()["match"]["decision"] == "pursue"
+    # Pursued -> Compliance runs. This fixture KB has only an experience certificate, so the rules hard-fail it.
+    assert r1.status_code == 200 and r1.json()["match"]["decision"] == "pursue"
+    assert r1.json()["status"] == "blocked" and r1.json()["compliance"]["blocked"] is True
     assert r2.json()["status"] == "skipped" and "Jumla" in r2.json()["match"]["skip_reasons"][0]
+    assert r2.json()["compliance"] is None  # a skipped tender never reaches Compliance
     rows = api.get("/tenders").json()
     assert [r["id"] for r in rows] == [good.id, off.id]
     assert rows[0]["reasons"][-1].startswith("[model] ")
+    assert rows[0]["hard_failures"] >= 1 and rows[1]["hard_failures"] is None
 
 
 def test_analyze_conflicts(api, db_session):

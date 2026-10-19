@@ -21,7 +21,7 @@ def test_seed_demo_company(pg_url, session_factory, db_session, make_client):
     assert company.licence_classes == ["C"] and company.province == "gandaki"
 
     docs = {d.filename: d for d in db_session.scalars(select(Document))}
-    assert len(docs) == 5
+    assert len(docs) == 6
     today = date(2026, 10, 17)
     tax = docs["03_tax_clearance_2081-82.pdf"]
     assert tax.doc_type == "tax_clearance" and tax.fiscal_year_bs == "2081/82"

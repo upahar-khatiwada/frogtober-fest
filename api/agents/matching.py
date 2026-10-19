@@ -42,6 +42,8 @@ POINTS = {"procurement_type": 30, "geography": 30, "budget": 25, "deadline": 15}
 # Statuses Matching may (re)run from (`failed` only with a Scout record, i.e. a failed Matching run).
 # Later stages keep their match; re-matching them would skip past Compliance.
 MATCHABLE = {TenderStatus.EXTRACTED, TenderStatus.MATCHED, TenderStatus.SKIPPED, TenderStatus.FAILED}
+# With `rematch=True` (only `pipeline.orchestrator.analyze_tender`, which re-runs Compliance right after).
+REMATCHABLE = MATCHABLE | {TenderStatus.CHECKED, TenderStatus.BLOCKED}
 
 DETERMINISTIC_MODEL = "deterministic"  # agent_runs.model for a run that made no LLM call
 
@@ -257,10 +259,13 @@ def _record_code_run(session: Session, tender: Tender, payload: dict[str, Any], 
 
 
 def run_matching(session: Session, client: LLMClient, tender: Tender, *, settings: Settings | None = None,
-                 now: datetime | None = None) -> MatchResult | None:
-    """Match one extracted tender: replace its `matches` row, set status matched/skipped (or failed on LLMError)."""
+                 now: datetime | None = None, rematch: bool = False) -> MatchResult | None:
+    """Match one extracted tender: replace its `matches` row, set status matched/skipped (or failed on LLMError).
+
+    `rematch=True` also accepts a checked/blocked tender; the caller must run Compliance again afterwards.
+    """
     settings = settings or get_settings()
-    if TenderStatus(tender.status) not in MATCHABLE or tender.record_json is None:
+    if TenderStatus(tender.status) not in (REMATCHABLE if rematch else MATCHABLE) or tender.record_json is None:
         raise ValueError(f"tender {tender.id} is {tender.status}; Matching runs on extracted/matched/skipped tenders")
     loaded = load_company(session)
     if loaded is None:

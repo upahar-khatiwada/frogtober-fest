@@ -6,7 +6,7 @@ from pydantic import Field
 
 from schemas._base import Contract, FiscalYearBS
 from schemas.company import CompanyProfile
-from schemas.compliance import ComplianceReport
+from schemas.compliance import ComplianceView
 from schemas.enums import (BuyerLevel, DocType, IngestStatus, MatchDecision, NoticeLanguage, ProcurementMethod,
                            ProcurementType, Province, TenderSource, TenderStatus)
 from schemas.match import MatchResult
@@ -33,7 +33,7 @@ class TenderDetail(Contract):
     deadline_view: DeadlineView | None = None
     record: TenderRecord | None = None
     match: MatchResult | None = None
-    compliance: ComplianceReport | None = None
+    compliance: ComplianceView | None = Field(None, description="Null until Compliance has run.")
 
 
 class TenderListItem(Contract):
@@ -55,6 +55,7 @@ class TenderListItem(Contract):
     score: int | None = Field(None, description="Match score; null until Matching has run.")
     decision: MatchDecision | None = None
     reasons: list[str] = Field(default_factory=list)
+    hard_failures: int | None = Field(None, description="Hard compliance failures; null until Compliance has run.")
     needs_review: bool = False
     source_url: str | None = None
 

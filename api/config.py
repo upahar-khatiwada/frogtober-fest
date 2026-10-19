@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # Ask the LLM even when a deterministic rule already forces skip (costs a model call per skipped tender).
     match_llm_on_hard_skip: bool = False
 
+    # --- Compliance (agents/compliance.py) ---
+    # KB chunks retrieved per requirement the rules do not cover, and shown to the model.
+    compliance_top_k: int = 4
+
     # --- CORS: the Next.js web origin(s) allowed to call this API ---
     web_origin: str = "http://localhost:3000"
 

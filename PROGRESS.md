@@ -101,6 +101,49 @@
   - `test_health` now checks the still-stubbed proposal route for 501. New `-m ollama` smoke test: the real model rates 001 above 003.
 - **Not run:** `score_matching --llm` and the new smoke test. There is still no Ollama on this machine (`curl localhost:11434` refused).
 
+### Prompt 7: Compliance agent, override, analyze = Matching + Compliance (2026-10-19) ✅ (offline). Real-model metric NOT run
+- Read spec §8.1, §8.2 and §17 this session, from the PDF.
+- **`agents/compliance.py::check_requirements(tender, company, documents, client=, retrieve_fn=, now=)`**, in two layers:
+  - **Layer 1 (rules):** `nepal.rules.evaluate_rules`. Changes to the Prompt 3 engine:
+    - every outcome now carries `evidence_document_ids` and a plain-language `action_needed` (null on pass);
+    - a pass needs a readable KB document (chunk id) or a `tender.*` field. A profile entry alone is no longer evidence, so NP-LICENCE-RENEWAL and NP-JV need the licence copy / JV agreement;
+    - the self-declaration and power of attorney moved from NP-REG-DOCS to the new **NP-BID-FORMS** (signed per bid, never a fail);
+    - new **NP-DOC-VALIDITY** (dated eligibility documents lapsing between the deadline and deadline + bid validity: unclear + "renew before" action, soft, `[VERIFY]`);
+    - new **NP-OTHER-DOCS** (mandatory notice documents no rule checked; runs last; never a fail);
+    - the NP-TAX-CLEARANCE message lists what is on file with expiry dates;
+    - `DOC_RULES` maps doc types to rules. 14 rules in total.
+  - **Layer 2 (model):** `covering_rules` / `needs_model` route each `TenderRecord.requirements` entry deterministically: doc types via `classify_document`, plus turnover / experience / bid-security wording. A rule that did not fire for the tender covers nothing. Residual aspects (licence class, personnel, equipment, liquid assets, ...) go to the model even when a rule covers the rest. Each such requirement gets its own top-k retrieval (`COMPLIANCE_TOP_K`=4) and one `ComplianceAssessment` call at temperature 0. The prompt says when to answer unclear, ranks licence classes (A > B > C > D, क/ख/ग/घ), and lists what code already checked.
+  - **`ground()`**: cited chunk ids must be among the excerpts shown, and the quote must be in a cited chunk (`agents.scout.Grounder` tolerance). Otherwise a pass or fail becomes `unclear`, and the reason is written into the explanation. Severity is code's: mandatory -> hard.
+- **Schemas:** `ComplianceAssessment` is now ONE requirement (`status`, `evidence_chunk_ids`, `evidence_quote`, `explanation`; no severity, rule_id or requirement). A pass or fail without a chunk id is invalid output, so it is retried and then fails the stage. `ComplianceFinding` was removed. `ComplianceItem` gained `source` (new enum `ItemSource`), `evidence_document_ids`, `evidence_ref`, `action_needed` and `requirement_index`, and its validator now requires a pass to have a chunk id, a document id, or a rule citing `tender.*`. New `ComplianceOverride`, `ComplianceOverrideRequest` and `ComplianceView` (items, blocked, hard_failures, counts, override, proposal_allowed). `TenderDetail.compliance` is now a `ComplianceView`, and `TenderListItem` gained `hard_failures`.
+- **DB (migration `0002`):** `compliance_items` + `source` (CHECK), `evidence_chunk_ids` / `evidence_document_ids` (INT[]), `evidence_ref`, `evidence_quote`, `action_needed`, `requirement_index`; new table `compliance_overrides` (tender_id, overridden_by, reason, hard_failures JSONB of `ComplianceItem.key`, created_at). `upsert_notices` drops overrides too when the text changes.
+- **`run_compliance`:**
+  - runs from matched/checked/blocked;
+  - loads `DocumentMeta` from `documents` (`load_document_meta`: chunk id = first chunk of a `ready` document; closes the loader half of issue 19);
+  - replaces `compliance_items`, writes one `deterministic` agent_runs row for the rules layer (each model call writes its own through the client), and sets `checked` / `blocked`;
+  - sets `failed` on an LLM error. An embedding failure (`RetrievalError`) writes its own failed row.
+  - **Override:** `override_block` stores who, why, when and which failures, and sets `checked`. It stays active only while every current hard failure is among those accepted, so a re-check that finds a new hard failure blocks again. `proposal_allowed` is the Proposal gate.
+- **API:**
+  - `POST /tenders/{id}/analyze` = Matching (new `rematch=True`, which also accepts checked/blocked) then Compliance. A tender Matching no longer pursues loses its stale items.
+  - `GET /tenders/{id}` includes the compliance section; `GET /tenders` rows include `hard_failures`.
+  - new `POST /tenders/{id}/compliance/override` (422 / 404 / 409);
+  - `POST /tenders/{id}/proposal` returns 409 while blocked (or not checked), and 501 once the gate passes (the stage is not built yet).
+  - `web/lib/api/types.ts` regenerated (`bun run gen:api`); `bunx tsc --noEmit` is clean apart from the known LayoutProps issue.
+- **Demo data:** added `data/demo_company/06_construction_licence.txt` (FICTIONAL, class C, DEMO-C-0421, renewed for FY 2083/84, valid to 2084-03-32 BS). Without it, NP-REG-DOCS hard-failed every tender (no licence document in the KB). The expired FY 2081/82 tax clearance is kept as the demo beat (**issue 29 decided: option (a)**).
+- **Golden set:** `data/golden/compliance_requirements.json` hand-labels **54 mandatory requirements** across 7 pursued seeds (001, 002, 015, 016, 019, 027, 029). Each label has a verbatim quote (tested), a plain-English text, the verdict for the demo company from its KB, hard yes/no, and a rule id or keywords. Oracle Scout fields (required docs, criteria, bid security, bid validity) are labelled too. There are 11 must-fail labels: tax clearance x7, and for 002 also licence class, turnover, experience and equipment.
+- **Metric script:** `scripts/score_compliance.py` reports recall (requirements covered), **hard-fail recall** (the worst error), status accuracy, false hard fails and blocked accuracy. The demo KB is parsed and chunked like ingest into memory. `--llm` adds the real model with in-memory top-k retrieval; `--records` uses Scout output.
+- **Measured (oracle records, rules only, no model; 2026-10-19 12:00 NPT):**
+  - **recall = 1.0** (54/54 requirements covered by some item);
+  - **hard-fail recall = 0.818** (9/11). Missed: `002:licence_class` and `002:key_equipment`. Both are model-layer requirements, which are unclear without a model.
+  - status accuracy 0.667 (36/54). The gaps are conservative unclears: turnover (look-back years not extracted, no audit reports), experience (certificates not classified `similar`), and the model-layer passes (licence class, personnel, equipment);
+  - **false hard fails 0**; blocked accuracy 1.0 (7/7 blocked, all on NP-TAX-CLEARANCE).
+  - The model layer can only add hard fails, so 0.818 is the floor; 1.0 needs the model to fail 002's class A/B and its batching plant.
+- **Tests:** `uv run pytest -q` gives **552 passed, 4 deselected** (was 502).
+  - `test_compliance.py` (42): routing; the prompt; **the demo expired-document case is a hard fail that blocks**, with document id and action; a fresh clearance unblocks; 002 fails on turnover/experience with JV barred; one call per uncovered requirement (schema, temperature 0, one agent_runs row each); **unclear-never-pass** (unknown chunk, quote not in chunk, no quote, fail without evidence, schema rejects a chunk-less pass and retries, offline, every pass across all golden tenders); a mandatory model fail is hard, an optional one soft; the DB loader; persistence and round trip; re-run replaces; **the override path** (stored who/why/when/keys, gate opens, survives a same-failure re-check, a new failure blocks again, refused unless blocked); failed on model or embedding error; refused statuses; analyze from blocked; stale items dropped; golden quotes verbatim; scorer arithmetic; offline metric floor; CLI.
+  - `test_compliance_api.py` (3): analyze -> blocked with the detail section and list `hard_failures`; proposal 409 -> override 422/200 -> proposal 501 -> second override 409; 404s.
+  - `test_nepal_rules.py` +6 (expired clearance, bid-validity lapse, other docs, an action on every non-pass, profile is not evidence, bid forms).
+  - New `-m ollama` smoke test for Compliance on 001 (not run).
+- **Not run:** `score_compliance --llm` and the smoke test. There is still no Ollama on this machine (`curl localhost:11434` refused).
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -159,6 +202,16 @@
 - **One `matches` row per tender**, replaced on re-run. The `reasons` JSONB holds the whole `MatchResult` dump (signals, scores, skip reasons, chunk ids), so detail views need no join and no migration.
 - **Matching is allowed from `failed`** when a record exists (a retry after a model failure). `checked` and later are refused, because re-matching would bypass Compliance.
 
+- **Compliance asks the model one requirement at a time (Prompt 7)**, each with its own retrieval. That is more calls (3 for seed 001), but each prompt is small, retrieval is specific, and every call has its own agent_runs row. A 7B model is more reliable on one question than on a list.
+- **A model pass or fail must be grounded in code**: a cited chunk that was shown, and a verbatim quote from it. Otherwise it is `unclear`, with the reason in the explanation. This is an explicit downgrade, not silent coercion. A `fail` needs evidence too: no retrieved evidence is not proof of failure, and a mandatory fail blocks the bid.
+- **Severity is code's**: mandatory requirement -> hard (task + CLAUDE.md). Rule items keep the severity in `rules.yaml`. Only `fail` + `hard` blocks; a hard `unclear` never does.
+- **Profile entries are not evidence.** A pass needs a readable KB document, or (for rules) the notice itself. Profile figures still drive thresholds (turnover), but a pass also needs audit reports. JV and licence renewal are unclear until the agreement / licence copy is uploaded.
+- **Per-bid forms (self-declaration, power of attorney) never fail.** They are signed for each bid, so their absence from the KB means "prepare it", not "ineligible".
+- **Documents lapsing inside the bid validity period are `unclear` + "renew before" (soft)**, because the rule behind it is unverified. Expiry before the deadline stays a hard fail.
+- **Override = accepting a specific set of hard failures.** It is stored with the failures' keys (`rule_id:requirement`) and stays active only while the current hard failures are a subset. Overrides are kept as history, never deleted, except when the notice text changes. The failures stay on the report, and status `checked` means "may proceed".
+- **Re-analysis is allowed from checked/blocked** (upload a renewed document, then analyze again). `run_matching` alone still refuses those statuses; only the orchestrator passes `rematch=True`, and it always re-runs Compliance.
+- **The demo KB gets a construction licence document (`06_...txt`).** The expired tax clearance stays as the deliberate blocker (issue 29 -> option a).
+
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
 - `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
@@ -169,6 +222,9 @@
 (Prompt 3 note, superseded: §8.2 was re-read in Prompt 5b; §13 still not re-read.)
 
 - §11 `matches.reasons` stores the full `MatchResult` JSON (an object), not just a reasons array. §10.2 `GET /tenders` returns `TenderListItem`s (not `TenderDetail`s). `POST /tenders/{id}/analyze` runs Matching only until Compliance exists.
+
+- §11 `compliance_items` gained structured evidence columns + `action_needed` + `source`, plus a new `compliance_overrides` table (spec has none; the override is required by this task). `evidence` (TEXT) is kept as a readable summary.
+- §10.2: a new route `POST /tenders/{id}/compliance/override`; `POST /tenders/{id}/proposal` now has a 409 gate (still 501 behind it). `TenderDetail.compliance` is a `ComplianceView`, not a bare `ComplianceReport`.
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -212,7 +268,7 @@ New (Prompt 4):
 28. Starlette warns that `TestClient` with `httpx` is deprecated (`httpx2`). Not ours to fix yet.
 
 New (Prompt 5a):
-29. **Demo KB vs strong match:** 001 (and 015/016/019/029) will fail `NP-TAX-CLEARANCE` against the demo company's expired FY 2081/82 clearance. Team call: (a) keep it as a demo beat (blocked, upload FY 2082/83 clearance, unblocked), or (b) add a valid FY 2082/83 tax clearance to `data/demo_company/` (manifest + `build_demo_docs.py`) so 001 passes cleanly and the expired one is just history.
+29. **Decided in Prompt 7: option (a)** (expired clearance kept as the demo beat; a licence copy was added instead). **Demo KB vs strong match:** 001 (and 015/016/019/029) will fail `NP-TAX-CLEARANCE` against the demo company's expired FY 2081/82 clearance. Team call: (a) keep it as a demo beat (blocked, upload FY 2082/83 clearance, unblocked), or (b) add a valid FY 2082/83 tax clearance to `data/demo_company/` (manifest + `build_demo_docs.py`) so 001 passes cleanly and the expired one is just history.
 30. ~~Nepal-layer parsing gaps~~: **fixed in Prompt 5b** (`parse_deadline`, strict grouping + compound amounts in `parse_npr`). `deadline_from_raw` itself is unchanged; Scout uses `parse_deadline`. Original note: `deadline_from_raw` fails on `"2083-08-05 B.S. (2026-11-21 A.D.)"` (BS+AD in one string), `"…१२ बजे"` (hour without minutes) and `"15/08/2083 by 12 noon"`. Scout must pass only the BS date part, or the normaliser should strip the bracketed AD and bare hours. `parse_npr` rejects compound amounts (`"रु. ३२ लाख ५० हजार"`), and **silently accepts mis-grouped digits** (`"Rs. 1,50,000,00"` → 15,000,000) where it should flag invalid lakh grouping.
 31. **Live scraper yields little:** both live tender notices on 2026-10-19 were scanned PDFs. Without OCR (out of scope) the live path is a demonstration of polite scraping, not a data source. The robots.txt fetch also saw an intermittent connection reset (the run then fetches nothing).
 32. Kankai's terms of use: no page was found. Re-check before any heavier or scheduled use. APScheduler is not wired to the scraper, and should not be without that check.
@@ -230,14 +286,21 @@ New (Prompt 6):
 40. **Matching has never run against a real model, so there are no model numbers.** Once Ollama is up: `uv run pytest -m ollama` (does the grammar accept `MatchAssessment` in context?), then `uv run python -m api.scripts.score_matching --llm --out ../data/golden/match_report.json`. Expect core@3 to rise from 0.33 and 007/037 to drop below the threshold; record the numbers here. Then repeat with `--records` from real Scout output (issue 35), which measures Scout + Matching together.
 41. The metric's `--llm` mode sees **no KB chunks** (no DB in the script) and oracle titles are file slugs. The API path (`run_matching`) does retrieve chunks. A DB-backed metric mode would measure retrieval too.
 42. Weights and points (0.6 / 30-30-25-15 / threshold 60 / cap 2.0x / tight 7 days) are first guesses. Tune them only against `match_relevance.json` with the real model, and watch out for overfitting 37 synthetic notices.
-43. `GET /tenders` has no compliance status yet (Compliance not built) and no full-text search.
+43. ~~`GET /tenders` has no compliance status~~: Prompt 7 added `hard_failures` per row. Still no full-text search.
+
+New (Prompt 7):
+44. **Compliance has never run against a real model.** Once Ollama is up: `uv run pytest -m ollama`, then `uv run python -m api.scripts.score_compliance --llm --out ../data/golden/compliance_report.json`. Record recall / hard-fail recall here; the target is hard-fail recall 1.0 (002 class A/B and batching plant) with 0 false hard fails. Then `--records` with real Scout output (issue 35): Scout's requirement lists decide what the model layer even sees.
+45. **Experience stays `unclear`** on every demo tender: `DocumentMeta.similar` is never set (issue 19, classifier half) and Scout does not extract `min_similar_projects` (issue 18). A deterministic "similar work" classifier, or a user tick on upload, would turn 001/015/016/019/029 experience into a pass.
+46. **Turnover stays `unclear`** when the notice says "best 3 of the last 5 years" (Scout leaves `turnover_years` null) and because the demo KB has no `audit_report` documents. Supporting "best N of M" in `TenderCriteria` + NP-TURNOVER, and adding audited statements to the demo KB, would fix both.
+47. `covering_rules` / `_RESIDUAL` are keyword lists tuned on 7 synthetic notices (English + Nepali). Real notices will word things differently `[VERIFY]`; a miss means a requirement is judged only by the rule (if covered) or only by the model.
+48. No UI yet for the compliance checklist, `action_needed` or the override form (who/why). The web app should show `evidence_quote` next to the chunk and the document link.
+49. Analyze is synchronous: Matching plus about 3 model calls per tender, which is slow on the 7B model on CPU. A background job may be needed for the demo (spec §17: pre-cached analyses).
 
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
 ## Next prompt
-Prompt 7: get a real model running (issues 12/13), then measure: `pytest -m ollama`, `score_scout --manifest` (issue 35), `score_matching --llm` (issue 40), and record the numbers. Tune the Scout/Matching prompts only against those misses. Then build Compliance:
-- the `documents` -> `DocumentMeta` loader (issue 19) and the issue 29 decision;
-- `agents/compliance.py`: `evaluate_rules` + an LLM `ComplianceAssessment` for requirements the rules don't cover, persisted to `compliance_items`, `checked` / `blocked`;
-- pass it as `compliance=` in `routers/tenders.py::analyze_tender` (the orchestrator already gates it on `matched`), and add compliance to `TenderDetail` / `TenderListItem`;
-- wire Scout -> Matching from `POST /tenders/scrape` as a background task.
+Prompt 8: get a real model running (issues 12/13), then measure everything that is still unmeasured: `pytest -m ollama`, `score_scout --manifest` (35), `score_matching --llm` (40) and `score_compliance --llm` (44). Record the numbers and tune the prompts only against those misses. Then:
+- wire Scout -> Matching (-> Compliance) from `POST /tenders/scrape` as a background task;
+- start the Proposal agent behind `agents.compliance.proposal_allowed` (RAG per section, cite chunk ids, use the compliance report's `action_needed` items as known gaps);
+- optional quick wins for compliance quality: "best N of M" turnover (46) and the experience `similar` classification (45).

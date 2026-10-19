@@ -29,6 +29,13 @@
       "file": "05_company_profile.pdf",
       "doc_type": "company_profile",
       "_note": "Capability statement: projects, personnel, equipment. Main proposal-RAG source."
+    },
+    {
+      "file": "06_construction_licence.txt",
+      "doc_type": "business_licence",
+      "fiscal_year_bs": "2083/84",
+      "expires_on_bs": "2084-03-32",
+      "_note": "VALID: class C construction licence DEMO-C-0421, renewed for FY 2083/84 (ends 2084 Asar 32 = 2027-07-16 AD). Matches profile.json; added in Prompt 7 so NP-REG-DOCS / NP-LICENCE-RENEWAL have document evidence."
     }
   ]
 }

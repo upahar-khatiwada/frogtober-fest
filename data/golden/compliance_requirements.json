@@ -1,0 +1,191 @@
+{
+  "_comment": "Hand-labelled MANDATORY requirements of 7 synthetic seed notices, for the Compliance metric (api/scripts/score_compliance.py). FICTIONAL data (seed notices + demo company). Labelled 2026-10-19 (Prompt 7) by reading each notice in data/seed_tenders/.",
+  "_labelling_rules": [
+    "One label per distinct mandatory requirement the bidder must meet or submit. A compound line (e.g. 'registration and class D licence renewed for 2083/84') is split into its parts. Conditional items (JV agreement 'if a JV') are not labelled.",
+    "quote: verbatim from the notice (checked by tests/test_compliance.py). text: the requirement in plain English (it becomes Requirement.text in oracle records).",
+    "expected: what a careful human reviewer would conclude for the DEMO COMPANY from its KB (data/demo_company/, incl. 05_company_profile.pdf) and profile, at 2026-10-19 12:00 NPT. pass = the KB shows it is met; fail = the KB shows it is not; unclear = the KB cannot show it either way, or it is prepared per bid (self-declaration, bid security).",
+    "hard: true when failing it disqualifies the bid. Every expected=fail label here is hard, so it must come out as a hard fail (missing one is the worst error).",
+    "rule_id: the deterministic rule that should cover it. Labels without rule_id are left to the model layer; keywords match the item's requirement text (case-insensitive) in that case.",
+    "record: the oracle Scout output for compliance (required_docs, criteria, bid security, bid validity). Deadline, cost, buyer, type and method come from data/seed_tenders/manifest.json. Criteria counts ('at least one') are filled as an ideal extraction would; Scout does not yet extract min_similar_projects (PROGRESS issue 18)."
+  ],
+  "now": "2026-10-19T12:00:00+05:45",
+  "tenders": {
+    "001": {
+      "expected_blocked": true,
+      "record": {
+        "required_docs": [
+          {"doc_type": "company_registration", "description": "Valid firm/company registration certificate"},
+          {"doc_type": "business_licence", "description": "Construction licence of Class D or above"},
+          {"doc_type": "licence_renewal", "description": "Licence renewed for F/Y 2083/84", "fiscal_year_bs": "2083/84"},
+          {"doc_type": "pan_vat", "description": "VAT and PAN registration certificate"},
+          {"doc_type": "tax_clearance", "description": "Tax clearance certificate of F/Y 2082/83", "fiscal_year_bs": "2082/83"},
+          {"doc_type": "self_declaration", "description": "Self-declaration (not blacklisted, no conflict of interest)"},
+          {"doc_type": "bid_security", "description": "Bid security bank guarantee"},
+          {"doc_type": "jv_agreement", "description": "Registered JV agreement (JV bids only)", "mandatory": false}
+        ],
+        "criteria": {"min_avg_turnover_npr": 15000000, "turnover_years": null, "min_similar_projects": 1, "min_similar_value_npr": 6000000},
+        "bid_security": {"amount_npr": 446000, "validity_days": 128},
+        "bid_validity_days": 90
+      },
+      "requirements": [
+        {"key": "registration", "text": "Valid firm/company registration certificate", "quote": "Valid firm/company registration certificate", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-REG-DOCS"},
+        {"key": "licence_class", "text": "Construction licence of class \"D\" or above", "quote": "construction licence of Class \"D\" or above", "category": "eligibility", "expected": "pass", "hard": true, "keywords": ["class"]},
+        {"key": "licence_renewal", "text": "Construction licence renewed for F/Y 2083/84", "quote": "renewed for F/Y 2083/84", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-LICENCE-RENEWAL"},
+        {"key": "pan_vat", "text": "VAT and PAN registration certificate", "quote": "VAT and PAN registration certificate", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-PAN-VAT"},
+        {"key": "tax_clearance", "text": "Tax clearance certificate of F/Y 2082/83, or evidence of tax return submission for F/Y 2082/83", "quote": "Tax clearance certificate of F/Y 2082/83, or evidence of tax return submission for F/Y 2082/83", "category": "eligibility", "expected": "fail", "hard": true, "rule_id": "NP-TAX-CLEARANCE"},
+        {"key": "turnover", "text": "Average annual construction turnover (best three of the last five fiscal years) of at least Rs. 1,50,00,000", "quote": "Average annual construction turnover of the best three years within the last five fiscal years of at least Rs. 1,50,00,000", "category": "financial", "expected": "pass", "hard": true, "rule_id": "NP-TURNOVER"},
+        {"key": "experience", "text": "At least one similar road work of at least Rs. 60,00,000 in a single contract within the last five fiscal years", "quote": "Successful completion of at least one similar road work (gravel or blacktop road) of value not less than Rs. 60,00,000 in a single contract within the last five fiscal years", "category": "experience", "expected": "pass", "hard": true, "rule_id": "NP-EXPERIENCE"},
+        {"key": "self_declaration", "text": "Self-declaration that the bidder is not blacklisted and has no conflict of interest", "quote": "Self-declaration that the bidder is not blacklisted and has no conflict of interest", "category": "eligibility", "expected": "unclear", "hard": true, "rule_id": "NP-BID-FORMS"},
+        {"key": "key_personnel", "text": "Key personnel: one civil engineer and one sub-engineer", "quote": "Key personnel: one civil engineer and one sub-engineer", "category": "personnel", "expected": "pass", "hard": true, "keywords": ["personnel", "engineer"]},
+        {"key": "key_equipment", "text": "Key equipment: one excavator, one roller (8-10 t), two tippers", "quote": "key equipment: one excavator, one roller (8-10 t), two tippers", "category": "equipment", "expected": "pass", "hard": true, "keywords": ["equipment", "excavator"]},
+        {"key": "bid_security", "text": "Bid security of Rs. 4,46,000 (bank guarantee or cash deposit)", "quote": "bid security of Rs. 4,46,000/-", "category": "financial", "expected": "unclear", "hard": true, "rule_id": "NP-BID-SECURITY"}
+      ]
+    },
+    "002": {
+      "expected_blocked": true,
+      "record": {
+        "required_docs": [
+          {"doc_type": "company_registration", "description": "Company registration"},
+          {"doc_type": "business_licence", "description": "Valid construction licence of Class A or B"},
+          {"doc_type": "pan_vat", "description": "VAT/PAN registration"},
+          {"doc_type": "tax_clearance", "description": "Tax clearance certificate for F/Y 2082/83", "fiscal_year_bs": "2082/83"},
+          {"doc_type": "bid_security", "description": "Unconditional bank guarantee"}
+        ],
+        "criteria": {"min_avg_turnover_npr": 250000000, "turnover_years": 3, "min_similar_projects": 1, "min_similar_value_npr": 90000000},
+        "bid_security": {"amount_npr": 5550000, "validity_days": 150},
+        "bid_validity_days": 120,
+        "performance_security_percent": 5
+      },
+      "requirements": [
+        {"key": "licence_class", "text": "Valid construction licence of class \"A\" or \"B\" only", "quote": "Contractors holding a valid construction licence of Class \"A\" or \"B\" only", "category": "eligibility", "expected": "fail", "hard": true, "keywords": ["class"]},
+        {"key": "turnover", "text": "Average annual construction turnover of the last three fiscal years of not less than NPR 25,00,00,000", "quote": "Average annual construction turnover of the last three fiscal years (2080/81, 2081/82 and 2082/83) of not less than NPR 25,00,00,000", "category": "financial", "expected": "fail", "hard": true, "rule_id": "NP-TURNOVER"},
+        {"key": "experience", "text": "At least one river training, embankment or bank protection work of at least NPR 9,00,00,000 in a single contract", "quote": "Specific experience of at least one river training, embankment or bank protection work of value not less than NPR 9,00,00,000 in a single contract completed within the last seven fiscal years", "category": "experience", "expected": "fail", "hard": true, "rule_id": "NP-EXPERIENCE"},
+        {"key": "liquid_assets", "text": "Liquid assets and/or credit facilities of not less than NPR 3,70,00,000", "quote": "Liquid assets and/or credit facilities of not less than NPR 3,70,00,000", "category": "financial", "expected": "unclear", "hard": true, "keywords": ["liquid"]},
+        {"key": "key_equipment", "text": "Key equipment: 3 excavators (min 0.9 m3), 1 batching plant (30 m3/hr), 1 transit mixer, 2 dewatering pumps", "quote": "Availability of key equipment: 3 excavators (min 0.9 m3), 1 batching plant (30 m3/hr), 1 transit mixer, 2 dewatering pumps", "category": "equipment", "expected": "fail", "hard": true, "keywords": ["equipment", "excavator"]},
+        {"key": "registration", "text": "Company registration", "quote": "Company registration", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-REG-DOCS"},
+        {"key": "pan_vat", "text": "VAT/PAN registration", "quote": "VAT/PAN registration", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-PAN-VAT"},
+        {"key": "tax_clearance", "text": "Tax clearance certificate for F/Y 2082/83", "quote": "tax clearance certificate for F/Y 2082/83", "category": "eligibility", "expected": "fail", "hard": true, "rule_id": "NP-TAX-CLEARANCE"},
+        {"key": "bid_security", "text": "Bid security of NPR 55,50,000 (unconditional bank guarantee, 150 days)", "quote": "Bid security of NPR 55,50,000", "category": "financial", "expected": "unclear", "hard": true, "rule_id": "NP-BID-SECURITY"}
+      ]
+    },
+    "015": {
+      "expected_blocked": true,
+      "record": {
+        "required_docs": [
+          {"doc_type": "business_licence", "description": "निर्माण व्यवसाय इजाजतपत्र (\"घ\" वर्ग वा माथि)"},
+          {"doc_type": "licence_renewal", "description": "आ.व. २०८३/८४ को नवीकरण", "fiscal_year_bs": "2083/84"},
+          {"doc_type": "company_registration", "description": "फर्म दर्ता"},
+          {"doc_type": "pan_vat", "description": "मू.अ.कर र स्थायी लेखा नम्बर दर्ता प्रमाणपत्र"},
+          {"doc_type": "tax_clearance", "description": "आ.व. २०८२/८३ को कर चुक्ता प्रमाणपत्र", "fiscal_year_bs": "2082/83"},
+          {"doc_type": "bid_security", "description": "बोलपत्र जमानत"}
+        ],
+        "criteria": {"min_avg_turnover_npr": 20000000, "turnover_years": null, "min_similar_projects": 1, "min_similar_value_npr": 9000000},
+        "bid_security": {"amount_npr": 705000, "validity_days": 120},
+        "bid_validity_days": 90,
+        "domestic_preference": true
+      },
+      "requirements": [
+        {"key": "licence_class", "text": "Construction licence of class \"Gha\" (D) or above", "quote": "\"घ\" वा सो भन्दा माथिको वर्गको निर्माण व्यवसाय इजाजतपत्र", "category": "eligibility", "expected": "pass", "hard": true, "keywords": ["class", "वर्ग"]},
+        {"key": "licence_renewal", "text": "Construction licence renewed for F/Y 2083/84", "quote": "आ.व. २०८३/८४ को लागि नवीकरण भएको", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-LICENCE-RENEWAL"},
+        {"key": "registration", "text": "Firm registration certificate", "quote": "फर्म दर्ता", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-REG-DOCS"},
+        {"key": "pan_vat", "text": "VAT and PAN registration certificate", "quote": "मू.अ.कर र स्थायी लेखा नम्बर दर्ता प्रमाणपत्र", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-PAN-VAT"},
+        {"key": "tax_clearance", "text": "Tax clearance certificate of F/Y 2082/83", "quote": "आ.व. २०८२/८३ को कर चुक्ता प्रमाणपत्र", "category": "eligibility", "expected": "fail", "hard": true, "rule_id": "NP-TAX-CLEARANCE"},
+        {"key": "turnover", "text": "Average annual turnover (best three of the last five fiscal years) of at least Rs. 2,00,00,000", "quote": "पछिल्लो पाँच आर्थिक वर्षमध्ये उत्कृष्ट तीन वर्षको औसत वार्षिक कारोबार रकम कम्तीमा रु. २,००,००,०००/-", "category": "financial", "expected": "pass", "hard": true, "rule_id": "NP-TURNOVER"},
+        {"key": "experience", "text": "Building construction experience of at least Rs. 90,00,000 in a single contract within the last five years", "quote": "पछिल्लो पाँच वर्षभित्र एउटै ठेक्कामा कम्तीमा रु. ९०,००,०००/- बराबरको भवन निर्माणको अनुभव", "category": "experience", "expected": "pass", "hard": true, "rule_id": "NP-EXPERIENCE"},
+        {"key": "bid_security", "text": "Bid security of Rs. 7,05,000, valid at least 120 days from the deadline", "quote": "बोलपत्र जमानत: रु. ७,०५,०००/-", "category": "financial", "expected": "unclear", "hard": true, "rule_id": "NP-BID-SECURITY"}
+      ]
+    },
+    "016": {
+      "expected_blocked": true,
+      "record": {
+        "required_docs": [
+          {"doc_type": "business_licence", "description": "Construction licence class D or above"},
+          {"doc_type": "pan_vat", "description": "VAT/PAN"},
+          {"doc_type": "tax_clearance", "description": "Tax clearance of F/Y 2082/83", "fiscal_year_bs": "2082/83"},
+          {"doc_type": "bid_security", "description": "Bid security"}
+        ],
+        "criteria": {"min_avg_turnover_npr": 10000000, "turnover_years": null, "min_similar_projects": 1, "min_similar_value_npr": 5000000},
+        "bid_security": {"amount_npr": 336000, "validity_days": 120}
+      },
+      "requirements": [
+        {"key": "licence_class", "text": "Construction licence class \"D\" or above", "quote": "construction licence class \"D\" or above", "category": "eligibility", "expected": "pass", "hard": true, "keywords": ["class"]},
+        {"key": "pan_vat", "text": "VAT/PAN registration", "quote": "VAT/PAN", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-PAN-VAT"},
+        {"key": "tax_clearance", "text": "Tax clearance of F/Y 2082/83", "quote": "tax clearance of F/Y 2082/83", "category": "eligibility", "expected": "fail", "hard": true, "rule_id": "NP-TAX-CLEARANCE"},
+        {"key": "turnover", "text": "Average annual turnover of Rs. 1,00,00,000 (best three of the last five years)", "quote": "average annual turnover of Rs. 1,00,00,000 (best three of the last five years)", "category": "financial", "expected": "pass", "hard": true, "rule_id": "NP-TURNOVER"},
+        {"key": "experience", "text": "Experience of at least one public building of Rs. 50,00,000 in a single contract within the last five years", "quote": "experience of at least one public building of Rs. 50,00,000 in a single contract within the last five years", "category": "experience", "expected": "pass", "hard": true, "rule_id": "NP-EXPERIENCE"},
+        {"key": "bid_security", "text": "Bid security of Rs. 3,36,000, valid at least 120 days from the deadline", "quote": "Bid security: Rs. 3,36,000, valid for at least 120 days from the deadline", "category": "financial", "expected": "unclear", "hard": true, "rule_id": "NP-BID-SECURITY"}
+      ]
+    },
+    "019": {
+      "expected_blocked": true,
+      "record": {
+        "required_docs": [
+          {"doc_type": "business_licence", "description": "Construction licence of class D or above"},
+          {"doc_type": "company_registration", "description": "Firm registration"},
+          {"doc_type": "pan_vat", "description": "VAT/PAN"},
+          {"doc_type": "tax_clearance", "description": "Tax clearance for F/Y 2082/83 or evidence of tax return submission", "fiscal_year_bs": "2082/83"},
+          {"doc_type": "bid_security", "description": "Bank guarantee or cash deposit voucher"}
+        ],
+        "criteria": {"min_avg_turnover_npr": null, "turnover_years": null, "min_similar_projects": 1, "min_similar_value_npr": 3500000},
+        "bid_security": {"amount_npr": 217000, "validity_days": 120}
+      },
+      "requirements": [
+        {"key": "licence_class", "text": "Construction licence of class \"D\" or above", "quote": "construction licence of class \"D\" or above", "category": "eligibility", "expected": "pass", "hard": true, "keywords": ["class"]},
+        {"key": "registration", "text": "Firm registration", "quote": "firm registration", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-REG-DOCS"},
+        {"key": "pan_vat", "text": "VAT/PAN registration", "quote": "VAT/PAN", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-PAN-VAT"},
+        {"key": "tax_clearance", "text": "Tax clearance for F/Y 2082/83 or evidence of tax return submission", "quote": "tax clearance for F/Y 2082/83 or evidence of tax return submission", "category": "eligibility", "expected": "fail", "hard": true, "rule_id": "NP-TAX-CLEARANCE"},
+        {"key": "experience", "text": "At least one similar work (retaining wall, gabion, river training or drainage) of Rs. 35,00,000 in a single contract in the last five years", "quote": "at least one similar work (retaining wall, gabion, river training or drainage) of Rs. 35,00,000 in a single contract in the last five years", "category": "experience", "expected": "pass", "hard": true, "rule_id": "NP-EXPERIENCE"},
+        {"key": "bid_security", "text": "Bid security of Rs. 2,17,000, valid 120 days from the deadline", "quote": "Bid security: Rs. 2,17,000", "category": "financial", "expected": "unclear", "hard": true, "rule_id": "NP-BID-SECURITY"}
+      ]
+    },
+    "027": {
+      "expected_blocked": true,
+      "record": {
+        "required_docs": [
+          {"doc_type": "company_registration", "description": "Firm registration"},
+          {"doc_type": "business_licence", "description": "Construction licence"},
+          {"doc_type": "pan_vat", "description": "VAT/PAN"},
+          {"doc_type": "tax_clearance", "description": "Tax clearance of F/Y 2082/83", "fiscal_year_bs": "2082/83"},
+          {"doc_type": "self_declaration", "description": "Self-declaration"},
+          {"doc_type": "bid_security", "description": "Bank guarantee (75 days) or cash deposit voucher"}
+        ],
+        "criteria": {},
+        "bid_security": {"percent": 2.5, "validity_days": 75},
+        "bid_validity_days": 45
+      },
+      "requirements": [
+        {"key": "registration", "text": "Firm registration", "quote": "firm registration", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-REG-DOCS"},
+        {"key": "licence", "text": "Valid construction licence", "quote": "construction licence", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-REG-DOCS"},
+        {"key": "pan_vat", "text": "VAT/PAN registration", "quote": "VAT/PAN", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-PAN-VAT"},
+        {"key": "tax_clearance", "text": "Tax clearance of F/Y 2082/83", "quote": "tax clearance of F/Y 2082/83", "category": "eligibility", "expected": "fail", "hard": true, "rule_id": "NP-TAX-CLEARANCE"},
+        {"key": "self_declaration", "text": "Self-declaration", "quote": "a self-declaration", "category": "eligibility", "expected": "unclear", "hard": true, "rule_id": "NP-BID-FORMS"},
+        {"key": "bid_security", "text": "Bid security of 2.5% of the quoted amount (bank guarantee valid 75 days or cash deposit)", "quote": "Bid security: 2.5% of the quoted amount", "category": "financial", "expected": "unclear", "hard": true, "rule_id": "NP-BID-SECURITY"}
+      ]
+    },
+    "029": {
+      "expected_blocked": true,
+      "record": {
+        "required_docs": [
+          {"doc_type": "business_licence", "description": "\"घ\" वर्ग वा माथिको निर्माण व्यवसाय इजाजतपत्र"},
+          {"doc_type": "licence_renewal", "description": "आ.व. २०८३/८४ को नवीकरण", "fiscal_year_bs": "2083/84"},
+          {"doc_type": "company_registration", "description": "फर्म दर्ता"},
+          {"doc_type": "pan_vat", "description": "मू.अ.कर र स्थायी लेखा नम्बर दर्ता प्रमाणपत्र"},
+          {"doc_type": "tax_clearance", "description": "आ.व. २०८२/८३ को कर चुक्ता प्रमाणपत्र वा कर विवरण", "fiscal_year_bs": "2082/83"},
+          {"doc_type": "bid_security", "description": "बोलपत्र जमानत"}
+        ],
+        "criteria": {"min_avg_turnover_npr": 8000000, "turnover_years": null, "min_similar_projects": 1, "min_similar_value_npr": 4000000},
+        "bid_security": {"amount_npr": 260000, "validity_days": 120}
+      },
+      "requirements": [
+        {"key": "licence_class", "text": "Construction licence of class \"Gha\" (D) or above", "quote": "\"घ\" वर्ग वा सो भन्दा माथिको निर्माण व्यवसाय इजाजतपत्र", "category": "eligibility", "expected": "pass", "hard": true, "keywords": ["class", "वर्ग"]},
+        {"key": "licence_renewal", "text": "Construction licence renewed for F/Y 2083/84", "quote": "आ.व. २०८३/८४ को नवीकरण सहित", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-LICENCE-RENEWAL"},
+        {"key": "registration", "text": "Firm registration certificate", "quote": "फर्म दर्ता", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-REG-DOCS"},
+        {"key": "pan_vat", "text": "VAT and PAN registration certificate", "quote": "मू.अ.कर र स्थायी लेखा नम्बर दर्ता प्रमाणपत्र", "category": "eligibility", "expected": "pass", "hard": true, "rule_id": "NP-PAN-VAT"},
+        {"key": "tax_clearance", "text": "Tax clearance certificate of F/Y 2082/83, or proof of tax return submission", "quote": "आ.व. २०८२/८३ को कर चुक्ता प्रमाणपत्र वा कर विवरण पेश गरेको प्रमाण", "category": "eligibility", "expected": "fail", "hard": true, "rule_id": "NP-TAX-CLEARANCE"},
+        {"key": "turnover", "text": "Average annual turnover (best three of the last five fiscal years) of at least Rs. 80,00,000", "quote": "उत्कृष्ट तीन वर्षको औसत वार्षिक कारोबार कम्तीमा रु. ८०,००,०००/-", "category": "financial", "expected": "pass", "hard": true, "rule_id": "NP-TURNOVER"},
+        {"key": "experience", "text": "Road construction or maintenance experience of Rs. 40,00,000 or more in a single contract within the last five years", "quote": "एउटै ठेक्कामा रु. ४०,००,०००/- वा सोभन्दा बढीको सडक निर्माण वा मर्मतको अनुभव", "category": "experience", "expected": "pass", "hard": true, "rule_id": "NP-EXPERIENCE"},
+        {"key": "bid_security", "text": "Bid security of Rs. 2,60,000, valid at least 120 days from the deadline", "quote": "बोलपत्र जमानत: रु. २,६०,०००/-", "category": "financial", "expected": "unclear", "hard": true, "rule_id": "NP-BID-SECURITY"}
+      ]
+    }
+  }
+}

@@ -8,7 +8,8 @@ by code or entered by the user.
 """
 
 from schemas.company import AnnualTurnover, CompanyProfile, ContractorLicence, JVPartner
-from schemas.compliance import ComplianceAssessment, ComplianceFinding, ComplianceItem, ComplianceReport
+from schemas.compliance import (ComplianceAssessment, ComplianceItem, ComplianceOverride, ComplianceOverrideRequest,
+                                ComplianceReport, ComplianceView)
 from schemas.enums import (
     BuyerLevel,
     ComplianceStatus,
@@ -16,6 +17,7 @@ from schemas.enums import (
     DocType,
     EvaluationMethod,
     IngestStatus,
+    ItemSource,
     MatchDecision,
     NoticeLanguage,
     ProcurementMethod,
@@ -58,7 +60,10 @@ __all__ = [
     "CompanyView",
     "DeadlineView",
     "ComplianceAssessment",
-    "ComplianceFinding",
+    "ComplianceOverride",
+    "ComplianceOverrideRequest",
+    "ComplianceView",
+    "ItemSource",
     "ComplianceItem",
     "ComplianceReport",
     "ComplianceStatus",

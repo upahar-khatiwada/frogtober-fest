@@ -155,6 +155,13 @@ class ComplianceStatus(StrEnum):
     UNCLEAR = "unclear"
 
 
+class ItemSource(StrEnum):
+    """Which Compliance layer produced an item: a deterministic Nepal rule, or the model's KB judgement."""
+
+    RULE = "rule"
+    MODEL = "model"
+
+
 class Severity(StrEnum):
     HARD = "hard"  # a fail blocks proposal generation
     SOFT = "soft"
