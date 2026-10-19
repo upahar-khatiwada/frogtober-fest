@@ -18,4 +18,4 @@ def test_openapi_exposes_stage_contracts():
 
 
 def test_stub_routes_still_return_501():
-    assert client.get("/tenders/1").status_code == 501
+    assert client.post("/tenders/1/proposal").status_code == 501

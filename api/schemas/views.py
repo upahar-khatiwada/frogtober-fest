@@ -7,9 +7,22 @@ from pydantic import Field
 from schemas._base import Contract, FiscalYearBS
 from schemas.company import CompanyProfile
 from schemas.compliance import ComplianceReport
-from schemas.enums import DocType, IngestStatus, TenderSource, TenderStatus
+from schemas.enums import (BuyerLevel, DocType, IngestStatus, MatchDecision, NoticeLanguage, ProcurementMethod,
+                           ProcurementType, Province, TenderSource, TenderStatus)
 from schemas.match import MatchResult
 from schemas.tender import TenderRecord
+
+
+class DeadlineView(Contract):
+    """A submission deadline in both calendars. All values computed by code (nepal.dates), never the LLM."""
+
+    ad: datetime = Field(description="Aware NPT (UTC+05:45) datetime.")
+    ad_date: date = Field(description="The deadline's calendar date in NPT.")
+    bs: str = Field(description="BS YYYY-MM-DD (lookup-table conversion).")
+    bs_long: str = Field(description='e.g. "5 Mangsir 2083".')
+    bs_ne: str = Field(description="Nepali (Devanagari) form of bs_long.")
+    days_left: int = Field(description="Calendar days from today (NPT) to the deadline date; negative once passed.")
+    passed: bool = Field(description="The deadline instant is at or before now (NPT).")
 
 
 class TenderDetail(Contract):
@@ -17,9 +30,33 @@ class TenderDetail(Contract):
     source_url: str | None = None
     status: TenderStatus
     deadline: datetime | None = None
+    deadline_view: DeadlineView | None = None
     record: TenderRecord | None = None
     match: MatchResult | None = None
     compliance: ComplianceReport | None = None
+
+
+class TenderListItem(Contract):
+    """One row of the ranked GET /tenders list."""
+
+    rank: int = Field(ge=1)
+    id: int
+    status: TenderStatus
+    title: str | None = None
+    buyer: str | None = None
+    buyer_level: BuyerLevel | None = None
+    procurement_type: ProcurementType | None = None
+    method: ProcurementMethod | None = None
+    province: Province | None = None
+    district: str | None = None
+    language: NoticeLanguage | None = None
+    estimated_cost_npr: int | None = None
+    deadline: DeadlineView | None = None
+    score: int | None = Field(None, description="Match score; null until Matching has run.")
+    decision: MatchDecision | None = None
+    reasons: list[str] = Field(default_factory=list)
+    needs_review: bool = False
+    source_url: str | None = None
 
 
 class CompanyView(CompanyProfile):

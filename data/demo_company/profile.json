@@ -1,6 +1,7 @@
 {
   "name": "Annapurna Demo Nirman Sewa Pvt. Ltd.",
   "sectors": ["civil works", "rural roads", "drainage and culverts", "small public buildings"],
+  "procurement_types": ["works"],
   "services": "Gravel and blacktop rural roads, side drains and culverts, gabion and stone-masonry retaining walls, and small public buildings (ward offices, school blocks, health posts) for local governments in Gandaki Province.",
   "location": "Pokhara Metropolitan City-8, Kaski",
   "province": "gandaki",

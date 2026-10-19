@@ -50,3 +50,25 @@ def test_real_ollama_scout_on_seed_001():
         record = extract_tender(client, text)
     assert runs[0].ok and runs[0].stage is Stage.SCOUT
     assert record.title and record.sources
+
+
+def test_real_ollama_matching_on_seed_001_and_003():
+    """Plumbing + sanity: the real model rates road works above ICU ventilators for the demo company."""
+    import json
+    from pathlib import Path
+
+    from agents.matching import assess
+    from schemas import CompanyProfile
+    from scripts.score_matching import oracle_record
+
+    root = Path(__file__).resolve().parents[2]
+    company = CompanyProfile.model_validate_json((root / "data" / "demo_company" / "profile.json").read_text(encoding="utf-8"))
+    manifest = json.loads((root / "data" / "seed_tenders" / "manifest.json").read_text(encoding="utf-8"))
+    notices = {n["id"]: n for n in manifest["notices"]}
+    runs = []
+    with LLMClient(runs.append) as client:
+        scores = {nid: assess(client, oracle_record(notices[nid], (root / "data" / "seed_tenders" / notices[nid]["file"])
+                                                    .read_text(encoding="utf-8")), company, []).score
+                  for nid in ("001", "003")}
+    assert all(r.ok and r.stage is Stage.MATCHING for r in runs)
+    assert scores["001"] > scores["003"]

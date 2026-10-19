@@ -9,7 +9,7 @@ from datetime import date
 from pydantic import Field
 
 from schemas._base import Contract, FiscalYearBS, NonEmptyStr
-from schemas.enums import ContractorClass, Province
+from schemas.enums import ContractorClass, ProcurementType, Province
 
 
 class ContractorLicence(Contract):
@@ -36,6 +36,10 @@ class JVPartner(Contract):
 class CompanyProfile(Contract):
     name: NonEmptyStr
     sectors: list[str] = Field(default_factory=list)
+    procurement_types: list[ProcurementType] = Field(
+        default_factory=list,
+        description="Procurement types the company bids on. Matching skips other types; empty = no filter.",
+    )
     services: str = ""
     location: str | None = None
     province: Province | None = None

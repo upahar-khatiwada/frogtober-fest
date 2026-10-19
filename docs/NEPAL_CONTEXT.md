@@ -264,3 +264,19 @@ The Scout LLM copies strings verbatim (`schemas/scout.py::TenderExtraction`). Ev
 - An unrecognised name becomes `other`.
 
 **Language** is computed, not asked of the LLM. Let *share* be the fraction of letters that are Devanagari. Below 0.02 the notice is `en`, above 0.92 it is `ne`, otherwise `mixed`. These thresholds fit all 37 seed notices. `[VERIFY]` them on real notices.
+
+## 14. Matching conventions (as implemented, Prompt 6)
+
+Matching (`api/agents/matching.py`) uses **no procurement-law threshold**. Every hard-skip check is either a fact from the notice compared with the company's own profile, or a company policy setting:
+
+| Signal | Check | Source of the number | Hard skip when |
+|---|---|---|---|
+| Procurement type | `TenderRecord.procurement_type` vs `CompanyProfile.procurement_types` (§1 enum) | company profile | the type is known and not listed (`unknown` = half points) |
+| Geography | notice district vs `districts_served`; if only a province is known, does it contain a served district (§8 district → province table in `nepal/geography.py`) | company profile | the district is not served, or the province has no served district |
+| Budget capacity | estimated cost / average turnover of the last `MATCH_TURNOVER_YEARS` FYs in the profile | **company policy** `MATCH_MAX_COST_TO_TURNOVER` (default 2.0). This is not a PPR rule. The notice's own turnover criterion (`TenderCriteria`) is left to Compliance (`NP-TURNOVER`). | the ratio is above the limit |
+| Deadline | `deadline_ad` ≤ now, both in NPT (UTC+05:45, §7) | the notice | the deadline has passed |
+
+- Contractor licence class limits are **not** used to judge capacity (sources conflict, §3 `[VERIFY]`).
+- A missing value (no district, no cost, no confirmed deadline) costs points but never skips. Scout leaves values null rather than guessing (§13), so the tender stays visible for a human.
+- **Deadline display (GET /tenders):** `DeadlineView` gives the AD datetime in NPT, the BS date from the lookup table (`ad_to_bs`, §7), `"5 Mangsir 2083"` and `"५ मंसिर २०८३"` forms, and `days_left` (calendar days between NPT dates; negative once passed). `deadline_within_days=N` means not passed and at most N NPT calendar days away.
+- The `district` filter accepts English, Nepali or a common spelling and normalises with `normalize_location` (`तनहुँ` → Tanahun).

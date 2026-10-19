@@ -142,6 +142,13 @@ class MatchDecision(StrEnum):
     SKIP = "skip"
 
 
+class SignalSource(StrEnum):
+    """Who produced a match signal: deterministic code (hard rule 5) or the model's judgement."""
+
+    DETERMINISTIC = "deterministic"
+    MODEL = "model"
+
+
 class ComplianceStatus(StrEnum):
     PASS = "pass"
     FAIL = "fail"

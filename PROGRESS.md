@@ -80,6 +80,27 @@
   - New `-m ollama` smoke test runs Scout on seed 001.
 - **Scorer on the real model: NOT run.** No Ollama on this machine (`curl localhost:11434` refused; issues 12/13). The CLI was run and fails cleanly: both notices show `FAILED /api/chat failed: connection refused`, exit 1. **No accuracy numbers exist yet.** For reference, an ideal (hand-written) extraction of 001 scores 100% on all fields (`test_scorer_on_ideal_extraction_of_001_is_perfect`), so that is the ceiling the code half allows, not a model result.
 
+### Prompt 6: Matching agent, ranked GET /tenders (2026-10-19) ✅ (offline). Real-model metric NOT run
+- Read spec §8.1, §10.3 and §10.4 this session, from the PDF.
+- **`agents/matching.py::score_tender(record, company, chunks, client=, settings=, now=)`**:
+  - **Deterministic signals** (`deterministic_signals`, 100 points): procurement type vs the new `CompanyProfile.procurement_types` (30), district/province served (30), estimated cost vs `MATCH_MAX_COST_TO_TURNOVER` x average turnover of the last 3 FYs (25), deadline in NPT incl. a tight-deadline penalty (15). A failed check is a **hard skip**. A missing value (no district, cost or confirmed deadline) loses points and never skips.
+  - **Model signal** (`assess`): `MatchAssessment` at temperature 0. The prompt asks for scope relevance only, shows top-k KB chunks as `[chunk N]`, and withholds deadline, cost and location (a test enforces this). It is **not called** when a rule already hard-skips (`MATCH_LLM_ON_HARD_SKIP=false`), which saves a 7B call per obvious skip.
+  - **`combine` (code decides):** score = 0.6 x semantic + 0.4 x deterministic. A hard skip caps the score at threshold-1, so skipped tenders always rank below pursued ones. pursue iff score >= `MATCH_THRESHOLD` (60) and no hard skip. Every reason is prefixed `[deterministic]` or `[model]`. `MatchResult` gained `deterministic_score`, `semantic_score`, `llm_weight`, `skip_reasons`, `signals[]` (`MatchSignal`, `SignalSource`) and `chunk_ids`.
+- **DB:** `run_matching` retrieves chunks (`db.search.retrieve`, `MATCH_TOP_K`=5; skipped on a hard skip), replaces the tender's single `matches` row (`reasons` JSONB = full `MatchResult` dump), and sets `matched` / `skipped`. LLM or embedding failure sets `failed` and drops the match. A code-only run writes its own agent_runs row (`model="deterministic"`, hard rule 9); an embedding failure writes a failed row. Matchable from `extracted/matched/skipped/failed` (with a record). `match_extracted_tenders` batches. `pipeline/orchestrator.py::analyze_tender` runs Compliance only when the tender is `matched` (the hook is None until Compliance lands).
+- **API:** `GET /tenders` is ranked (score desc, deadline asc, unscored last), with filters procurement_type, method, province, district (EN/NE normalised), buyer_level, min_score, deadline_within_days, language, plus decision, status and limit/offset. Each row is a `TenderListItem` with `DeadlineView` (AD in NPT, BS ISO, `"5 Mangsir 2083"`, Devanagari, `days_left`, `passed`). `GET /tenders/{id}` returns `TenderDetail` (+ `deadline_view`). `POST /tenders/{id}/analyze` runs Matching (409 if not matchable / no company). `deps.get_now` is the injectable NPT clock. `web/lib/api/types.ts` regenerated (`bun run gen:api`).
+- **Demo data:** `profile.json` gained `"procurement_types": ["works"]`. `data/golden/match_relevance.json` hand-labels all 37 seeds: 6 `core` (the manifest's strong/good matches 001, 015, 016, 019, 027, 029), 5 more `relevant` (in-scope messy works 004, 005, 006, 033, 034), and 26 not relevant, each with a reason.
+- **Metric script:** `scripts/score_matching.py`. Ranks like the API at the labels' fixed clock (2026-10-19 12:00 NPT). Default: "oracle" records from the manifest labels + deterministic signals only. `--llm` adds the real model; `--records` uses saved Scout output.
+- **Measured (deterministic only, oracle records, no model):**
+  - top 3 = 027, 033, 006. **relevant precision@3 = 1.0**, **core precision@3 = 0.33** (1/3).
+  - core ranks: 027 -> 1, 001 -> 4, 019 -> 5, 029 -> 6, 015 -> 7, 016 -> 8.
+  - relevant pursued 11/11 = **1.0**. Irrelevant skipped 24/26 = **0.92**: the false pursues are 007 (corrigendum, no scope) and 037 (cancellation); only the model can tell those. Pursue precision 11/13 = 0.85.
+  - All in-scope works tie at deterministic 100, and ties break by soonest deadline. So **ordering within the relevant set is entirely the model's job**, and core@3 = 0.33 is the code-only floor, not a model result. The other skips are all right: 002 (3.68x turnover), 032 (6.36x), 008 (deadline passed 2026-10-14), 003/013/014/022/023/024/030/035 (goods), consulting/services, and 017/018/020/028/036/021 (outside the districts served).
+- **Tests:** `uv run pytest -q` gives **502 passed, 3 deselected** (was 430).
+  - `test_matching.py` (42): each pre-filter incl. the NPT deadline boundary (12:00 NPT = 06:15 UTC); budget bands and the configurable cap; combine weights, caps, inclusive threshold and reason prefixes; the fake-LLM call at temp 0 with the schema; no model call on a hard skip; string score -> retry -> `LLMOutputError`; the prompt withholds code-owned facts; DB persist, re-run replaces, failed on a model or embed error, refused statuses, no company; a skipped tender never reaches the Compliance hook; the offline metric; labels vs manifest roles.
+  - `test_tenders_list_api.py` (30): ranking order; AD+BS+days_left; every filter incl. a Nepali district and combinations; 422s; pagination ranks; detail; analyze end to end; profile round-trip.
+  - `test_health` now checks the still-stubbed proposal route for 501. New `-m ollama` smoke test: the real model rates 001 above 003.
+- **Not run:** `score_matching --llm` and the new smoke test. There is still no Ollama on this machine (`curl localhost:11434` refused).
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -130,6 +151,14 @@
 - **Golden-set doc labels** use the rules written into `scout_expected.json`: documents to submit or hold; criteria-only evidence (turnover, experience) is excluded unless the notice names the document; non-standard documents count as `other`.
 - **`python -m api.<module>` from `api/` (follow-up to Prompt 5b).** `api/` is a flat app, so there was no `api` package. `api/api/__init__.py` is an alias package whose `__path__` is `api/` itself, so `uv run python -m api.agents.scout --seed` and `python -m api.scripts.score_scout` work, and the flat `-m agents.scout` still works. App code keeps importing flat names; nothing may `import api.*`. A test (`test_cli_module_paths_import`) runs all three module paths. **It works from `api/` only.** From the repo root `uv run` finds no project (it would need a root uv workspace, which moves `uv.lock`/`.venv` to the root and breaks the api Dockerfile), so that was not done.
 
+- **Matching splits code from judgement (Prompt 6).** Hard skips (type, area, capacity, deadline) are code. The LLM scores scope relevance only, and the prompt withholds the facts code owns, so the model can't double-count or override them. Code decides the score and the decision.
+- **A hard skip caps the score at threshold-1**, not 0. The list still ranks skipped tenders by how close they were, and they never outrank a pursued one.
+- **No LLM call on a hard skip** by default. Without the model, 26 of 37 seeds would each still cost a 7B call. `MATCH_LLM_ON_HARD_SKIP=true` restores it.
+- **Capacity = cost <= 2.0x average turnover (last 3 FYs)** is company policy and configurable, not a Nepal rule. The notice's own turnover criterion stays with Compliance (`NP-TURNOVER`), and JV pooling is not considered in Matching.
+- **"Sector overlap" is the model's job; "procurement type" is code's.** Sectors are free text (`"rural roads"`), so a deterministic overlap would be keyword guessing. The new `CompanyProfile.procurement_types` gives a clean enum check (empty = no filter). It is stored in `profile_json`, so no migration.
+- **One `matches` row per tender**, replaced on re-run. The `reasons` JSONB holds the whole `MatchResult` dump (signals, scores, skip reasons, chunk ids), so detail views need no join and no migration.
+- **Matching is allowed from `failed`** when a record exists (a retry after a model failure). `checked` and later are refused, because re-matching would bypass Compliance.
+
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
 - `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
@@ -138,6 +167,8 @@
 - §5.1 "one live portal scraper": the source is a municipal notice board, not a national portal. The national portal (bolpatra) blocks non-browser clients. And most live notices are scanned PDFs that yield no text without OCR (out of scope).
 - None in behaviour. Additive fields beyond §8.1/§11: `TenderStatus.failed`, `AgentRunRecord.attempts/error/raw_output` (the `agent_runs` table needs these three columns when migrations land), `ReviewGap.severity`, `ComplianceItem.explanation`. (The spec allowed bge-m3 *or* nomic-embed-text; choosing bge-m3 is a selection within the spec.)
 (Prompt 3 note, superseded: §8.2 was re-read in Prompt 5b; §13 still not re-read.)
+
+- §11 `matches.reasons` stores the full `MatchResult` JSON (an object), not just a reasons array. §10.2 `GET /tenders` returns `TenderListItem`s (not `TenderDetail`s). `POST /tenders/{id}/analyze` runs Matching only until Compliance exists.
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -193,15 +224,20 @@ New (Prompt 5b):
 36. Golden set: 10 of 15 entries are `todo` (004, 006, 007, 008, 011, 015, 021, 027, 033, 034). Their deadline/cost labels already exist in the manifest (`--manifest` scores them); the required-doc labels need a hand pass.
 37. Prompt size: the system prompt is about 1.1k tokens, plus the notice. With `LLM_NUM_CTX=8192` that is fine for seed notices, but long PDF attachments from the live scraper may exceed it. There is no chunking or truncation guard yet.
 38. The `दिनको` + hour 1–5 = PM heuristic and the language thresholds are unverified against real notices (NEPAL_CONTEXT §13 `[VERIFY]`).
-39. `needs_review` has no API or UI surface yet (GET /tenders is still 501). The UI should show `sources[].quote` next to each value and highlight `review_flags`.
+39. `needs_review` is now in the API (Prompt 6: `TenderListItem.needs_review`; `GET /tenders/{id}` returns `record.sources` / `review_flags`) but has no UI yet. The UI should show `sources[].quote` next to each value and highlight `review_flags`.
+
+New (Prompt 6):
+40. **Matching has never run against a real model, so there are no model numbers.** Once Ollama is up: `uv run pytest -m ollama` (does the grammar accept `MatchAssessment` in context?), then `uv run python -m api.scripts.score_matching --llm --out ../data/golden/match_report.json`. Expect core@3 to rise from 0.33 and 007/037 to drop below the threshold; record the numbers here. Then repeat with `--records` from real Scout output (issue 35), which measures Scout + Matching together.
+41. The metric's `--llm` mode sees **no KB chunks** (no DB in the script) and oracle titles are file slugs. The API path (`run_matching`) does retrieve chunks. A DB-backed metric mode would measure retrieval too.
+42. Weights and points (0.6 / 30-30-25-15 / threshold 60 / cap 2.0x / tight 7 days) are first guesses. Tune them only against `match_relevance.json` with the real model, and watch out for overfitting 37 synthetic notices.
+43. `GET /tenders` has no compliance status yet (Compliance not built) and no full-text search.
 
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
 ## Next prompt
-Prompt 6: get a real model running (issues 12/13), then run `pytest -m ollama` and `python -m api.scripts.score_scout --manifest` and record the Scout numbers in PROGRESS (issue 35). Tune `SYSTEM_PROMPT` only against those misses. Then wire the pipeline:
-- `pipeline/orchestrator.py`: Scout for `new` tenders from `POST /tenders/scrape`, as a background task.
-- Implement `GET /tenders` / `GET /tenders/{id}` (`TenderDetail` with `record.sources` / `review_flags`).
-- Write the `documents` → `DocumentMeta` loader so `evaluate_rules` runs against the demo company, and decide issue 29.
-- Then Matching (`MatchAssessment` → `MatchResult.from_assessment`).
-- Label the 10 `todo` golden entries (issue 36) and run the seed with real embeddings (issue 23).
+Prompt 7: get a real model running (issues 12/13), then measure: `pytest -m ollama`, `score_scout --manifest` (issue 35), `score_matching --llm` (issue 40), and record the numbers. Tune the Scout/Matching prompts only against those misses. Then build Compliance:
+- the `documents` -> `DocumentMeta` loader (issue 19) and the issue 29 decision;
+- `agents/compliance.py`: `evaluate_rules` + an LLM `ComplianceAssessment` for requirements the rules don't cover, persisted to `compliance_items`, `checked` / `blocked`;
+- pass it as `compliance=` in `routers/tenders.py::analyze_tender` (the orchestrator already gates it on `matched`), and add compliance to `TenderDetail` / `TenderListItem`;
+- wire Scout -> Matching from `POST /tenders/scrape` as a background task.

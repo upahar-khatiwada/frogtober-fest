@@ -25,18 +25,20 @@ from schemas.enums import (
     RequirementCategory,
     ReviewVerdict,
     Severity,
+    SignalSource,
     Stage,
     TenderSource,
     TenderStatus,
 )
-from schemas.match import MatchAssessment, MatchResult
+from schemas.match import MatchAssessment, MatchResult, MatchSignal
 from schemas.proposal import Proposal, ProposalSection
 from schemas.review import ReviewGap, ReviewReport, ReviewScores
 from schemas.runs import AgentRun, AgentRunRecord
 from schemas.scout import ExtractedDoc, Grounded, TenderExtraction
 from schemas.tender import (BidSecurity, FieldSource, RequiredDoc, Requirement, ReviewFlag, SecurityCalc, TenderCriteria,
                             TenderRecord)
-from schemas.views import CompanyDocumentView, CompanyView, ScrapeReport, ScrapeRequest, SkippedNotice, TenderDetail
+from schemas.views import (CompanyDocumentView, CompanyView, DeadlineView, ScrapeReport, ScrapeRequest, SkippedNotice,
+                           TenderDetail, TenderListItem)
 
 __all__ = [
     "TenderExtraction",
@@ -54,6 +56,7 @@ __all__ = [
     "CompanyDocumentView",
     "CompanyProfile",
     "CompanyView",
+    "DeadlineView",
     "ComplianceAssessment",
     "ComplianceFinding",
     "ComplianceItem",
@@ -68,6 +71,7 @@ __all__ = [
     "MatchAssessment",
     "MatchDecision",
     "MatchResult",
+    "MatchSignal",
     "NoticeLanguage",
     "ProcurementMethod",
     "ProcurementType",
@@ -88,6 +92,7 @@ __all__ = [
     "SkippedNotice",
     "Stage",
     "TenderDetail",
+    "TenderListItem",
     "TenderRecord",
     "TenderSource",
     "TenderStatus",

@@ -36,7 +36,7 @@ export interface paths {
         };
         /**
          * List Tenders
-         * @description Ranked list with filters.
+         * @description Ranked list: match score (high first), then deadline (soonest first). Unscored tenders come last.
          */
         get: operations["list_tenders_tenders_get"];
         put?: never;
@@ -56,7 +56,7 @@ export interface paths {
         };
         /**
          * Get Tender
-         * @description Tender detail, match result, compliance report.
+         * @description Tender detail and match result (the compliance report lands with the Compliance agent).
          */
         get: operations["get_tender_tenders__tender_id__get"];
         put?: never;
@@ -78,7 +78,7 @@ export interface paths {
         put?: never;
         /**
          * Analyze Tender
-         * @description Run Matching and Compliance.
+         * @description Run Matching, then Compliance if pursued. A model failure returns the tender with status `failed`.
          */
         post: operations["analyze_tender_tenders__tender_id__analyze_post"];
         delete?: never;
@@ -384,6 +384,11 @@ export interface components {
             /** Sectors */
             sectors?: string[];
             /**
+             * Procurement Types
+             * @description Procurement types the company bids on. Matching skips other types; empty = no filter.
+             */
+            procurement_types?: components["schemas"]["ProcurementType"][];
+            /**
              * Services
              * @default
              */
@@ -423,6 +428,11 @@ export interface components {
             name: string;
             /** Sectors */
             sectors?: string[];
+            /**
+             * Procurement Types
+             * @description Procurement types the company bids on. Matching skips other types; empty = no filter.
+             */
+            procurement_types?: components["schemas"]["ProcurementType"][];
             /**
              * Services
              * @default
@@ -523,6 +533,49 @@ export interface components {
             last_renewed_fy_bs?: string | null;
         };
         /**
+         * DeadlineView
+         * @description A submission deadline in both calendars. All values computed by code (nepal.dates), never the LLM.
+         */
+        DeadlineView: {
+            /**
+             * Ad
+             * Format: date-time
+             * @description Aware NPT (UTC+05:45) datetime.
+             */
+            ad: string;
+            /**
+             * Ad Date
+             * Format: date
+             * @description The deadline's calendar date in NPT.
+             */
+            ad_date: string;
+            /**
+             * Bs
+             * @description BS YYYY-MM-DD (lookup-table conversion).
+             */
+            bs: string;
+            /**
+             * Bs Long
+             * @description e.g. "5 Mangsir 2083".
+             */
+            bs_long: string;
+            /**
+             * Bs Ne
+             * @description Nepali (Devanagari) form of bs_long.
+             */
+            bs_ne: string;
+            /**
+             * Days Left
+             * @description Calendar days from today (NPT) to the deadline date; negative once passed.
+             */
+            days_left: number;
+            /**
+             * Passed
+             * @description The deadline instant is at or before now (NPT).
+             */
+            passed: boolean;
+        };
+        /**
          * DocType
          * @description Normalised eligibility/qualification document types (PPR Rule 40(2) + real notices).
          * @enum {string}
@@ -607,6 +660,56 @@ export interface components {
             decision: components["schemas"]["MatchDecision"];
             /** Threshold */
             threshold: number;
+            /**
+             * Deterministic Score
+             * @description Sum of deterministic fit points (0-100).
+             */
+            deterministic_score?: number | null;
+            /**
+             * Semantic Score
+             * @description The LLM's relevance score; null when the model was not asked (hard skip).
+             */
+            semantic_score?: number | null;
+            /**
+             * Llm Weight
+             * @description Weight of semantic_score in score.
+             */
+            llm_weight?: number | null;
+            /**
+             * Skip Reasons
+             * @description Deterministic hard-skip reasons.
+             */
+            skip_reasons?: string[];
+            /** Signals */
+            signals?: components["schemas"]["MatchSignal"][];
+            /**
+             * Chunk Ids
+             * @description KB chunks shown to the model.
+             */
+            chunk_ids?: number[];
+        };
+        /**
+         * MatchSignal
+         * @description One input to the match score. `hard_skip` signals force decision `skip` whatever the other points.
+         */
+        MatchSignal: {
+            /**
+             * Name
+             * @description procurement_type, geography, budget, deadline or semantic.
+             */
+            name: string;
+            source: components["schemas"]["SignalSource"];
+            /** Points */
+            points: number;
+            /** Max Points */
+            max_points: number;
+            /**
+             * Hard Skip
+             * @default false
+             */
+            hard_skip: boolean;
+            /** Detail */
+            detail: string;
         };
         /**
          * NoticeLanguage
@@ -819,6 +922,12 @@ export interface components {
          * @enum {string}
          */
         Severity: "hard" | "soft";
+        /**
+         * SignalSource
+         * @description Who produced a match signal: deterministic code (hard rule 5) or the model's judgement.
+         * @enum {string}
+         */
+        SignalSource: "deterministic" | "model";
         /** SkippedNotice */
         SkippedNotice: {
             /** Url */
@@ -854,9 +963,50 @@ export interface components {
             status: components["schemas"]["TenderStatus"];
             /** Deadline */
             deadline?: string | null;
+            deadline_view?: components["schemas"]["DeadlineView"] | null;
             record?: components["schemas"]["TenderRecord"] | null;
             match?: components["schemas"]["MatchResult"] | null;
             compliance?: components["schemas"]["ComplianceReport"] | null;
+        };
+        /**
+         * TenderListItem
+         * @description One row of the ranked GET /tenders list.
+         */
+        TenderListItem: {
+            /** Rank */
+            rank: number;
+            /** Id */
+            id: number;
+            status: components["schemas"]["TenderStatus"];
+            /** Title */
+            title?: string | null;
+            /** Buyer */
+            buyer?: string | null;
+            buyer_level?: components["schemas"]["BuyerLevel"] | null;
+            procurement_type?: components["schemas"]["ProcurementType"] | null;
+            method?: components["schemas"]["ProcurementMethod"] | null;
+            province?: components["schemas"]["Province"] | null;
+            /** District */
+            district?: string | null;
+            language?: components["schemas"]["NoticeLanguage"] | null;
+            /** Estimated Cost Npr */
+            estimated_cost_npr?: number | null;
+            deadline?: components["schemas"]["DeadlineView"] | null;
+            /**
+             * Score
+             * @description Match score; null until Matching has run.
+             */
+            score?: number | null;
+            decision?: components["schemas"]["MatchDecision"] | null;
+            /** Reasons */
+            reasons?: string[];
+            /**
+             * Needs Review
+             * @default false
+             */
+            needs_review: boolean;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** TenderRecord */
         TenderRecord: {
@@ -1022,7 +1172,23 @@ export interface operations {
     };
     list_tenders_tenders_get: {
         parameters: {
-            query?: never;
+            query?: {
+                procurement_type?: components["schemas"]["ProcurementType"] | null;
+                method?: components["schemas"]["ProcurementMethod"] | null;
+                province?: components["schemas"]["Province"] | null;
+                /** @description English or Nepali name; normalised to the canonical district. */
+                district?: string | null;
+                buyer_level?: components["schemas"]["BuyerLevel"] | null;
+                /** @description Only matched tenders scoring at least this. */
+                min_score?: number | null;
+                /** @description Deadline not passed and at most N calendar days away (NPT). */
+                deadline_within_days?: number | null;
+                language?: components["schemas"]["NoticeLanguage"] | null;
+                decision?: components["schemas"]["MatchDecision"] | null;
+                status?: components["schemas"]["TenderStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1035,15 +1201,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TenderDetail"][];
+                    "application/json": components["schemas"]["TenderListItem"][];
                 };
             };
-            /** @description Not implemented yet */
-            501: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -1067,6 +1235,13 @@ export interface operations {
                     "application/json": components["schemas"]["TenderDetail"];
                 };
             };
+            /** @description No such tender */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1075,13 +1250,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
-            };
-            /** @description Not implemented yet */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };
@@ -1105,6 +1273,20 @@ export interface operations {
                     "application/json": components["schemas"]["TenderDetail"];
                 };
             };
+            /** @description No such tender */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not extracted yet, already past Matching, or no company profile */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1113,13 +1295,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
-            };
-            /** @description Not implemented yet */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

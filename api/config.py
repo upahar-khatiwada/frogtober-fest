@@ -41,6 +41,22 @@ class Settings(BaseSettings):
     scraper_min_delay_s: float = 10.0
     scraper_cache_dir: Path = _API_DIR / ".cache" / "scraper"
 
+    # --- Matching (agents/matching.py). Company policy knobs, not procurement law. ---
+    # score >= threshold -> pursue (status matched); below -> skip (Compliance does not run).
+    match_threshold: int = 60
+    # Final score = llm_weight * semantic (LLM) + (1 - llm_weight) * deterministic fit points.
+    match_llm_weight: float = 0.6
+    # Hard skip when the estimated cost exceeds this multiple of the company's average annual turnover.
+    match_max_cost_to_turnover: float = 2.0
+    # Average turnover over this many most recent fiscal years in the profile.
+    match_turnover_years: int = 3
+    # Fewer days left than this loses deadline points (not a skip).
+    match_tight_deadline_days: int = 7
+    # KB chunks retrieved (cosine top-k) and shown to the model.
+    match_top_k: int = 5
+    # Ask the LLM even when a deterministic rule already forces skip (costs a model call per skipped tender).
+    match_llm_on_hard_skip: bool = False
+
     # --- CORS: the Next.js web origin(s) allowed to call this API ---
     web_origin: str = "http://localhost:3000"
 
