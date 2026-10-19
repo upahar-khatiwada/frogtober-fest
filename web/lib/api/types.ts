@@ -15,7 +15,10 @@ export interface paths {
         put?: never;
         /**
          * Scrape Tenders
-         * @description Run the scraper or load seed data; enqueue Scout.
+         * @description Load the synthetic seed set (default) or run the live scraper; upsert raw notices by source_url.
+         *
+         *     New tenders get status `new` and raw text only. Scout is not enqueued yet (it lands with
+         *     the Scout agent). The live source is slow on purpose (>= 10 s between requests).
          */
         post: operations["scrape_tenders_tenders_scrape_post"];
         delete?: never;
@@ -701,10 +704,62 @@ export interface components {
          */
         ReviewVerdict: "pass" | "fail";
         /**
+         * ScrapeReport
+         * @description Outcome of one load. Tenders are stored as raw text with status `new`; Scout extracts later.
+         */
+        ScrapeReport: {
+            source: components["schemas"]["TenderSource"];
+            /** Created */
+            created: number;
+            /**
+             * Updated
+             * @description raw_text changed: reset to status new and derived fields cleared.
+             */
+            updated: number;
+            /** Unchanged */
+            unchanged: number;
+            /** Tender Ids */
+            tender_ids: number[];
+            /** Skipped */
+            skipped?: components["schemas"]["SkippedNotice"][];
+            /**
+             * Blocked
+             * @description Live source only: why the run stopped early (robots, 403/429, unreachable).
+             */
+            blocked?: string | null;
+        };
+        /**
+         * ScrapeRequest
+         * @description POST /tenders/scrape body. Defaults load the synthetic seed set (the demo source).
+         */
+        ScrapeRequest: {
+            /** @default seed */
+            source: components["schemas"]["TenderSource"];
+            /**
+             * Max Pages
+             * @description Live source only: listing pages to read.
+             * @default 1
+             */
+            max_pages: number;
+            /**
+             * Max Notices
+             * @description Live source only: notice pages to fetch (>= 10 s apart).
+             * @default 3
+             */
+            max_notices: number;
+        };
+        /**
          * Severity
          * @enum {string}
          */
         Severity: "hard" | "soft";
+        /** SkippedNotice */
+        SkippedNotice: {
+            /** Url */
+            url: string;
+            /** Reason */
+            reason: string;
+        };
         /**
          * Stage
          * @enum {string}
@@ -799,6 +854,12 @@ export interface components {
             requirements?: components["schemas"]["Requirement"][];
         };
         /**
+         * TenderSource
+         * @description Where POST /tenders/scrape gets raw notices from. Not a DB column.
+         * @enum {string}
+         */
+        TenderSource: "seed" | "kankai";
+        /**
          * TenderStatus
          * @description Spec section 10.3 state machine.
          * @enum {string}
@@ -833,7 +894,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ScrapeRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -841,11 +906,20 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TenderDetail"][];
+                    "application/json": components["schemas"]["ScrapeReport"];
                 };
             };
-            /** @description Not implemented yet */
-            501: {
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Seed data missing or unreadable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

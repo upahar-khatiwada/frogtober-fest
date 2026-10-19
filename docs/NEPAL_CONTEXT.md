@@ -142,6 +142,20 @@ These map directly onto `TenderRecord` fields: `buyer`, `buyer_address`, `scope`
 - No official open-data or API feed (e.g. OCDS) was found. `[VERIFY]`
 - No portal login or submission ever (CLAUDE.md hard rule 6).
 
+**Scraper source check (2026-10-19, Prompt 5).** Each request below was made once with an honest UA (`TenderlyBot/0.1 ...`), and nothing was retried to get past a refusal:
+
+| Source | robots.txt | Terms | Outcome |
+|---|---|---|---|
+| `www.ppmo.gov.np` | connection reset (today); 2026-10-15: `Crawl-delay: 10` | not checked | not used |
+| `bolpatra.gov.np` | **HTTP 403** (nginx) | unknown `[VERIFY]` | **not used** (blocks non-browser clients) |
+| `www.nea.org.np` | a "Security Access Restricted" HTML page instead of robots | unknown | **not used** (WAF block) |
+| `pokharamun.gov.np` | connection reset | not checked | not used |
+| **`kankaimun.gov.np`** (Kankai Municipality, Jhapa, Koshi) | standard Drupal 7 file: `User-agent: *`, **`Crawl-delay: 10`**; disallows only `/admin/`, `/user/*`, `/search/`, `/node/add/`, install/cron files and asset dirs. The notice board `/ne/public-procurement-tender-notices`, notice pages `/ne/content/*` and attachments under `/sites/<host>/files/` are **not disallowed**. | **No terms-of-use, disclaimer or copyright policy page found.** The footer reads "© 2026 कनकाई नगरपालिका". Notices are public under PPA §14 (publication on the entity's website). | **Chosen source** for `api/ingest/scraper.py` |
+
+What the Kankai board actually contains: a Drupal view (10 rows per page, `?page=N`, 14 pages) that **mixes procurement notices with exam, meeting and holiday notices**, so the scraper filters titles by keyword. A notice page usually has **no body text**; the notice is a PDF in "Supporting Documents". Both tender PDFs checked on 2026-10-19 (`Suchana Dosro.pdf`, `Suchana.pdf`) were **scanned images with no text layer** (1 page, 0 characters). Without OCR (out of scope) they yield nothing, so **the live scraper currently produces few or no usable notices**. It skips and reports them. That is why the seed set (`data/seed_tenders/`) stays the demo source. One intermittent connection reset on robots.txt was also seen. The scraper then fetches nothing, as designed.
+
+Scraper rules as implemented: robots.txt is read first (a 401/403/5xx or network error means nothing is fetched); `can_fetch` is checked per URL; ≥10 s between requests (or the robots Crawl-delay if larger); GET only, same host only, no login, no cookies used; 401/403/429 stops the run with no retry; every page and attachment is cached raw on disk (`api/.cache/scraper/`), and notice pages are never refetched. Terms of use may change. Re-check before any heavier use `[VERIFY]`.
+
 ## 7. Calendar: Bikram Sambat (BS) and the fiscal year
 
 - Official documents use **Bikram Sambat**. Example from the Rules' title page: "Date of Publication in Nepal Gazette: 2064-5-3 B.S. (20 August 2007 A.D.)" (PPR-EN). BS runs about **56 years 8 months ahead** of AD (2064 BS ≈ 2007 AD, same source).
@@ -174,7 +188,7 @@ These map directly onto `TenderRecord` fields: `buyer`, `buyer_address`, `scope`
 3. Current bid-validity day counts.
 4. Domestic-preference % for goods (still 10%?) and any margin for domestic contractors/consultants.
 5. Contractor licence class limits (sources conflict) and the renewal rule text.
-6. e-GP robots.txt, terms of use, and any open-data feed.
+6. e-GP robots.txt, terms of use, and any open-data feed. (2026-10-19: still HTTP 403. Kankai municipality's robots.txt was checked instead and has no terms page, see section 6.)
 7. Whether the 2082 amendment bill / 2083 ordinance is in force.
 8. Official sources for the fiscal-year start, province names, district list, and NPT offset.
 9. BS↔AD conversion library choice.

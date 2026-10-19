@@ -7,7 +7,7 @@ from pydantic import Field
 from schemas._base import Contract, FiscalYearBS
 from schemas.company import CompanyProfile
 from schemas.compliance import ComplianceReport
-from schemas.enums import DocType, IngestStatus, TenderStatus
+from schemas.enums import DocType, IngestStatus, TenderSource, TenderStatus
 from schemas.match import MatchResult
 from schemas.tender import TenderRecord
 
@@ -45,3 +45,28 @@ class CompanyDocumentView(Contract):
     page_count: int | None = None
     chunk_count: int = 0
     uploaded_at: datetime
+
+
+class ScrapeRequest(Contract):
+    """POST /tenders/scrape body. Defaults load the synthetic seed set (the demo source)."""
+
+    source: TenderSource = TenderSource.SEED
+    max_pages: int = Field(1, ge=1, le=3, description="Live source only: listing pages to read.")
+    max_notices: int = Field(3, ge=1, le=10, description="Live source only: notice pages to fetch (>= 10 s apart).")
+
+
+class SkippedNotice(Contract):
+    url: str
+    reason: str
+
+
+class ScrapeReport(Contract):
+    """Outcome of one load. Tenders are stored as raw text with status `new`; Scout extracts later."""
+
+    source: TenderSource
+    created: int
+    updated: int = Field(description="raw_text changed: reset to status new and derived fields cleared.")
+    unchanged: int
+    tender_ids: list[int]
+    skipped: list[SkippedNotice] = Field(default_factory=list)
+    blocked: str | None = Field(None, description="Live source only: why the run stopped early (robots, 403/429, unreachable).")

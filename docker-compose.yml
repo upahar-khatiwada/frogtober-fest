@@ -24,6 +24,11 @@ services:
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct}
       EMBED_MODEL: ${EMBED_MODEL:-bge-m3}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      SEED_TENDERS_DIR: /data/seed_tenders
+      SCRAPER_CONTACT: ${SCRAPER_CONTACT:-}
+    volumes:
+      # Synthetic seed tenders for POST /tenders/scrape (data/ is outside the api build context).
+      - ./data/seed_tenders:/data/seed_tenders:ro
     depends_on:
       db:
         condition: service_healthy

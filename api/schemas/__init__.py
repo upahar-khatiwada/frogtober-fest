@@ -26,6 +26,7 @@ from schemas.enums import (
     ReviewVerdict,
     Severity,
     Stage,
+    TenderSource,
     TenderStatus,
 )
 from schemas.match import MatchAssessment, MatchResult
@@ -33,7 +34,7 @@ from schemas.proposal import Proposal, ProposalSection
 from schemas.review import ReviewGap, ReviewReport, ReviewScores
 from schemas.runs import AgentRun, AgentRunRecord
 from schemas.tender import BidSecurity, RequiredDoc, Requirement, TenderRecord
-from schemas.views import CompanyDocumentView, CompanyView, TenderDetail
+from schemas.views import CompanyDocumentView, CompanyView, ScrapeReport, ScrapeRequest, SkippedNotice, TenderDetail
 
 __all__ = [
     "AgentRun",
@@ -72,9 +73,13 @@ __all__ = [
     "ReviewReport",
     "ReviewScores",
     "ReviewVerdict",
+    "ScrapeReport",
+    "ScrapeRequest",
     "Severity",
+    "SkippedNotice",
     "Stage",
     "TenderDetail",
     "TenderRecord",
+    "TenderSource",
     "TenderStatus",
 ]

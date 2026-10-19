@@ -1,0 +1,48 @@
+#
+# robots.txt
+#
+# Fixture: copy of https://kankaimun.gov.np/robots.txt as fetched 2026-10-19
+# (standard Drupal 7 file). Abridged: the /misc, /modules, /profiles and
+# /themes asset Allow lines are cut to a few examples.
+#
+
+User-agent: *
+Crawl-delay: 10
+# CSS, JS, Images
+Allow: /misc/*.css$
+Allow: /misc/*.js$
+Allow: /modules/*.css$
+Allow: /modules/*.png
+# Directories
+Disallow: /includes/
+Disallow: /misc/
+Disallow: /modules/
+Disallow: /profiles/
+Disallow: /scripts/
+Disallow: /themes/
+# Files
+Disallow: /CHANGELOG.txt
+Disallow: /cron.php
+Disallow: /install.php
+Disallow: /update.php
+Disallow: /xmlrpc.php
+# Paths (clean URLs)
+Disallow: /admin/
+Disallow: /comment/reply/
+Disallow: /filter/tips/
+Disallow: /node/add/
+Disallow: /search/
+Disallow: /user/register/
+Disallow: /user/password/
+Disallow: /user/login/
+Disallow: /user/logout/
+# Paths (no clean URLs)
+Disallow: /?q=admin/
+Disallow: /?q=comment/reply/
+Disallow: /?q=filter/tips/
+Disallow: /?q=node/add/
+Disallow: /?q=search/
+Disallow: /?q=user/password/
+Disallow: /?q=user/register/
+Disallow: /?q=user/login/
+Disallow: /?q=user/logout/

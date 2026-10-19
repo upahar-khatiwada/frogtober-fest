@@ -7,8 +7,11 @@ without a code change.
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_API_DIR = Path(__file__).resolve().parent
 
 
 class Settings(BaseSettings):
@@ -24,8 +27,23 @@ class Settings(BaseSettings):
     # --- Database ---
     database_url: str = "postgresql://tenderly:tenderly@localhost:5432/tenderly"
 
+    # --- Tender ingestion (POST /tenders/scrape) ---
+    # Synthetic seed notices: the primary demo source (spec section 17).
+    seed_tenders_dir: Path = _API_DIR.parent / "data" / "seed_tenders"
+    # Live scraper (a bonus, never a dependency). An honest UA; set SCRAPER_CONTACT
+    # to a URL or email so a site admin can reach whoever runs it.
+    scraper_user_agent: str = "TenderlyBot/0.1 (Frogtoberfest research prototype; read-only; honours robots.txt)"
+    scraper_contact: str = ""
+    # Floor on the gap between requests; robots.txt Crawl-delay wins if larger.
+    scraper_min_delay_s: float = 10.0
+    scraper_cache_dir: Path = _API_DIR / ".cache" / "scraper"
+
     # --- CORS: the Next.js web origin(s) allowed to call this API ---
     web_origin: str = "http://localhost:3000"
+
+    @property
+    def scraper_ua(self) -> str:
+        return f"{self.scraper_user_agent[:-1]}; +{self.scraper_contact})" if self.scraper_contact else self.scraper_user_agent
 
     @property
     def cors_origins(self) -> list[str]:

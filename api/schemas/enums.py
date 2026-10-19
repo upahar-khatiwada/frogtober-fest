@@ -109,6 +109,13 @@ class Stage(StrEnum):
     REVIEW = "review"
 
 
+class TenderSource(StrEnum):
+    """Where POST /tenders/scrape gets raw notices from. Not a DB column."""
+
+    SEED = "seed"  # data/seed_tenders/ (synthetic; the demo source)
+    KANKAI = "kankai"  # live: kankaimun.gov.np public procurement notice board
+
+
 class TenderStatus(StrEnum):
     """Spec section 10.3 state machine."""
 
