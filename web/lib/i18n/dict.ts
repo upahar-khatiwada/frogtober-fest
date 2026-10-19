@@ -5,6 +5,7 @@
  */
 import type { Lang } from "@/lib/format";
 import { toDevanagariDigits } from "@/lib/nepal/calendar";
+import { DETAIL_EN, DETAIL_NE } from "@/lib/i18n/detail-messages";
 
 const en = {
   "app.name": "Tenderly",
@@ -189,6 +190,7 @@ const en = {
   "enum.ingest_status.ready": "Ready",
   "enum.ingest_status.needs_ocr": "Scanned (needs OCR)",
   "enum.ingest_status.failed": "Failed",
+  ...DETAIL_EN,
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -376,11 +378,14 @@ const ne: Record<MessageKey, string> = {
   "enum.ingest_status.ready": "तयार",
   "enum.ingest_status.needs_ocr": "स्क्यान गरिएको (OCR चाहिन्छ)",
   "enum.ingest_status.failed": "असफल",
+  ...DETAIL_NE,
 };
 
 export const DICTIONARIES: Record<Lang, Record<MessageKey, string>> = { en, ne };
 
-export type EnumKind = "procurement_type" | "method" | "buyer_level" | "province" | "language" | "decision" | "status" | "doc_type" | "ingest_status";
+export type EnumKind =
+  | "procurement_type" | "method" | "buyer_level" | "province" | "language" | "decision" | "status" | "doc_type" | "ingest_status"
+  | "evaluation_method" | "compliance_status" | "severity" | "run_status" | "stage" | "stage_status";
 
 /**
  * Look up a label and fill `{name}` placeholders. In Nepali, numeric values are written in
