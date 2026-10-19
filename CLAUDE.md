@@ -132,6 +132,7 @@ any stage --LLM invalid after one retry / timeout / crash / illegal edge--> fail
 | Purpose | Command |
 |---|---|
 | Start full stack | `docker compose up --build` (first time / after Dockerfile changes), `docker compose up` after |
+| Stack with NVIDIA GPU for Ollama | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d` (without it Ollama runs on CPU and Scout hits `LLM_TIMEOUT_S`; check `docker compose exec ollama ollama ps` says `100% GPU`) |
 | Pull models | `./scripts/setup.sh` (bash/Git Bash/WSL), or manually: `docker compose exec ollama ollama pull <model>` |
 | Backend deps | `cd api && uv sync` |
 | Backend dev server | `cd api && uv run fastapi dev main.py` |

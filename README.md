@@ -103,6 +103,18 @@ The api container runs the DB migrations on start. Compose publishes Postgres
 on `localhost:5432` and Ollama on `localhost:11434`, so all the host commands
 below can use the Compose services.
 
+**NVIDIA GPU (strongly recommended).** By default Ollama runs on the CPU: about 25
+prompt tokens/s, so Scout calls time out (`/api/chat timed out after 180.0s`). Add the
+GPU override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+docker compose exec ollama ollama ps        # PROCESSOR should say "100% GPU"
+```
+
+To make it the default, put `COMPOSE_FILE=docker-compose.yml;docker-compose.gpu.yml` in `.env`
+(use `;` on Windows and `:` on Linux/macOS). Then plain `docker compose up` picks it up.
+
 ### 3. Run the pieces on the host (without Docker for web/api)
 
 From the host, the database and Ollama URLs are `localhost`, not the Compose

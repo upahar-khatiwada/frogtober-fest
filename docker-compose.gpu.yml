@@ -1,0 +1,14 @@
+# Optional: give Ollama an NVIDIA GPU. Without it a 7B model runs on the CPU
+# (~25 prompt tokens/s), and Scout calls hit LLM_TIMEOUT_S.
+# Needs the NVIDIA driver (and on Windows, Docker Desktop with the WSL2 backend).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
