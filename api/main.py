@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import get_settings
 from deps import get_sessionmaker
 from pipeline.orchestrator import reap_stale_runs
-from routers import company, proposals, runs, tenders
+from routers import company, proposals, reference, runs, tenders
 
 settings = get_settings()
 log = logging.getLogger(__name__)
@@ -50,6 +50,7 @@ app.include_router(tenders.router)
 app.include_router(company.router)
 app.include_router(proposals.router)
 app.include_router(runs.router)
+app.include_router(reference.router)
 
 
 @app.get("/health", tags=["health"])
