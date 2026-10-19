@@ -204,6 +204,15 @@
 
 ### Frontend prompt: app shell, dashboard, company page (2026-10-19) ✅ (mock mode verified in the dev server; not run against a live API)
 - Read spec §9 this session (pages, server components for lists, typed client, 2 s polling, shadcn/ui).
+### Frontend prompt 2: /tenders/[id] (2026-10-19) ✅ (mock mode and vitest; not run against a live API)
+- Read spec §9.1/§9.2 again. Bun only.
+- **Page** `app/tenders/[id]/page.tsx` (server, `connection()` + Suspense): `loadTenderBundle(id)` + `listRules()`, then client `TenderWorkspace`. States: skeleton (Suspense), invalid id, 404 "not found", API error (alert), `failed` status banner (with the run's error when known), "not extracted yet", per-panel empty states.
+- **Panels** (`components/tender-detail/`): `ExtractedFields` (every `record.sources` row: value, raw, verbatim quote, "Needs review" badge from `lib/review-flags.ts`: a flag on the field, a raw string that parsed to null, or a quote not found in the notice; unmatched flags listed apart), `NepalSummary` (type, method, buyer level, evaluation, bid security amount + valid-until in BS and AD, bid validity, performance %, domestic preference, JV), `MatchPanel` (every reason tagged "Deterministic (code)" or "Model judgement"), `ComplianceMatrix` (green/red/amber rows with icon + text, expandable evidence: chunk text with the quoted span highlighted, document name, FY, expiry in the preferred calendar + Expired badge, notice field, explanation; action-needed column; rule badge → `#rule-<id>` in a "Rules used" list with description, source link, verified/unverified).
+- **Actions:** Analyze (`POST /tenders/{id}/analyze`, polls `GET /runs/{id}` every 2 s, shows stages, re-reads the tender when the run ends). Generate proposal is disabled with a visible reason unless compliance allows it; when blocked a separate "Override and generate…" button opens `OverrideDialog` (name + reason, lists the hard failures), records the override, refreshes, then calls the proposal route. 501 is shown as "not built yet".
+- **API additions** (`api/routers/reference.py`, registered in `main.py`): `GET /rules` (the `Rule` models: description, severity, source, verified, notes) and `GET /chunks?ids=` (chunk text + document filename/type/FY/expiry/is_expired). Needed because `ComplianceItem` carries only ids. Tests: `tests/test_reference_api.py`.
+- **Web:** `lib/api/tenderly.ts` gains `getTender`, `analyzeTender`, `getRun`, `overrideCompliance`, `generateProposal`, `listRules`, `listChunks`, `loadTenderBundle`, `parseTenderId`; `lib/mock/detail-api.ts` mocks all of it (tender 1 blocked, 27 clean; `/rules` and `/chunks` types are hand-written until `bun run gen:api`). `lib/i18n/detail-messages.ts` holds the new labels, merged into `dict.ts`. Dashboard titles now link to the page. Added the shadcn `dialog` component.
+- **Tests:** `components/__tests__/compliance-matrix.test.tsx` (empty, status rows and colours, blocked banner, action column, rule links and verified/unverified, expand/collapse for document and chunk evidence, missing chunk, override note) and `lib/__tests__/review-flags.test.ts`.
+
 - **App shell** (`app/layout.tsx`): header nav (Dashboard, Company, Runs), language toggle EN / नेपाली and calendar toggle BS / AD (`components/app-shell/`), both in localStorage (`tenderly.lang`, `tenderly.calendar`; defaults en + BS). Fonts: Geist for Latin + **Noto Sans Devanagari** (`next/font/google`, subsets devanagari+latin) via the `--font-sans` stack in `globals.css`; `:lang(ne)` gets taller line height. `<html lang>` follows the toggle. Amber banner when mocks are on.
 - **i18n** (`lib/i18n/dict.ts`): one flat dictionary per language, `translate()` with `{placeholders}` (numbers become Devanagari digits in Nepali) and `enumLabel()` for every API enum. Labels only; tender data is shown as the API returns it. `lib/prefs.tsx` holds `PreferencesProvider` (useSyncExternalStore, so SSR/hydration use defaults with no mismatch) and the `<T k=…/>` / `<EnumText/>` leaves that server components use.
 - **Utilities:** `lib/format.ts` (`groupLakh` 1,48,75,000, `formatNpr`, `formatNprShort` "Rs. 1.49 crore" / "रु. १.४९ करोड"), `lib/nepal/calendar.ts` (BS↔AD, `parseBsIso` with Devanagari digits, `formatBs` = the API's `bs_long`/`bs_ne` forms, `formatAd`, `formatDate`), `lib/deadline.ts` (NPT calendar days identical to `DeadlineView.days_left`, `countdown` with urgency ok/soon ≤7/urgent ≤3/today/passed, hours+minutes in the last 24 h, `countdownText` en/ne), `lib/reasons.ts` (parses `[deterministic]`/`[model]`/`SKIP:` prefixes; preview leads with skip, then model reasons), `lib/clock.ts` (`useNow`, 30 s tick, null during SSR so the API's `days_left` is shown first).
@@ -300,6 +309,9 @@
 - **Mocks are explicit, not automatic.** `NEXT_PUBLIC_USE_MOCKS=1` (build/dev-time; `NEXT_PUBLIC_*` is inlined into the client bundle) turns them on and shows a banner. Without it an unreachable API is shown as an error, so a demo can never silently present mock data as live.
 - **Server fetches use `API_URL`** (compose: `http://api:8000`), the browser uses `NEXT_PUBLIC_API_URL`.
 - **Expiry dates are always sent as AD** (`expires_on`), converted client-side with the exported table, so the BS picker and the API agree by construction.
+- **Evidence text comes from a new `GET /chunks`, rules from `GET /rules` (frontend prompt 2).** `ComplianceItem` carries ids only, and the matrix must show chunk text, document name and expiry. Loading is best effort: if it fails, the matrix still renders with ids and "Excerpt text unavailable".
+- **Generate proposal is never silently enabled.** It needs `proposal_allowed`; an override is a separate, explicit dialog (who, why, which failures) that then triggers generation.
+- **Needs-review is derived on the client** from `review_flags` + `sources` (a "deadline" flag covers `deadline_ad` and `deadline_bs_iso`); no backend change.
 
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
@@ -319,6 +331,7 @@
   - `POST /tenders/{id}/analyze` returns 202 + the run (background task) instead of the tender detail, and it also runs Scout on a `new` tender. `POST /tenders/scrape` still does not enqueue anything.
 - §11: a new `pipeline_runs` table; `agent_runs` gains `pipeline_run_id` (FK) and `cached`.
 - §9.1 (frontend prompt): `/runs` is a placeholder and `/tenders/[id]` and `/tenders/[id]/proposal` do not exist yet. Dashboard rows show reasons and hard-failure counts but do not link anywhere.
+- §9.1 `/tenders/[id]` exists. `/tenders/[id]/proposal` and the real `/runs` page do not yet. §10.2: two read-only additions, `GET /rules` and `GET /chunks`.
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -410,14 +423,11 @@ New (frontend prompt):
 60. Nepali UI labels were written by the model, not a native speaker `[VERIFY]` (e.g. "राष्ट्रिय बोलपत्र" for NCB, "सिलबन्दी दरभाउपत्र" for sealed quotation, "कर चुक्ता प्रमाणपत्र" for tax clearance). Have a Nepali reader review `lib/i18n/dict.ts`.
 61. Mock state is per tab in the browser and per process on the server, so a saved mock profile disappears on reload (the banner says so).
 62. A frontend BS date outside BS 2000–2099 falls back to AD display; the BS input rejects it.
+63. `/rules` and `/chunks` types are hand-written in `lib/api/tenderly.ts`; re-run `bun run gen:api` and switch to the generated types.
+64. Nothing has run against a live API or in a real browser (matrix colours, dialog focus, Nepali rendering). Tender-detail Nepali labels are model-written `[VERIFY]` (issue 60).
+65. After an override the page re-reads the tender and calls the proposal route, which is still a 501 stub, so "Generate proposal" cannot yet succeed end to end.
 
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
-## Next prompt
-Prompt 9: get a real model running (issues 12/13), then measure everything that is still unmeasured: `pytest -m ollama`, `score_scout --manifest` (35), `score_matching --llm` (40) and `score_compliance --llm` (44). Record the numbers and tune the prompts only against those misses. Then record the demo replay cache (issue 50: `precache_demo --seed-company`, then `--check`). After that:
-- optionally let `POST /tenders/scrape` start pipeline runs (`orchestrator.start_run` + `execute_run` per new tender, target `extracted` or `checked`);
-- start the Proposal agent as the orchestrator's Proposal runner (issue 54) behind `agents.compliance.proposal_allowed` (RAG per section, cite chunk ids, use the compliance report's `action_needed` items as known gaps);
-- optional quick wins for compliance quality: "best N of M" turnover (46) and the experience `similar` classification (45).
-
-Frontend track (parallel, can be a separate prompt): run the web app against the live API once (issue 57) and eyeball Nepali rendering in a browser (58). Then build `/tenders/[id]` (59): extracted fields with `sources[].quote` next to each value and `review_flags` highlighted (39), match signals, the compliance matrix with green/red/amber rows and an expandable evidence cell (spec §9.2, issue 48), the override form (who/why), and an "Analyze" button that polls `GET /runs/{id}` every 2 s. Then the real `/runs` log (55).
+run the web app against the live API once (57, 58, 64), then the real /runs log (55), then the Proposal agent behind proposal_allowed and /tenders/[id]/proposal. Keep the Prompt 9 backend text as the parallel backend track.
