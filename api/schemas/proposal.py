@@ -6,12 +6,13 @@ company record, the tender record, or verbatim KB quotes, and builds the stored 
 that cites no shown KB chunk is kept but flagged `ungrounded` (CLAUDE.md hard rule 8), never filled by invention.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import Field
 
 from schemas._base import Contract, NonEmptyStr
-from schemas.enums import ProposalLanguage, ProposalStatus, SectionFlagKind
+from schemas.enums import (ChecklistStatus, ComplianceStatus, DocType, ProposalLanguage, ProposalStatus, ReviewVerdict,
+                           SectionFlagKind)
 from schemas.review import ReviewReport
 
 
@@ -68,6 +69,11 @@ class Proposal(Contract):
     review: ReviewReport | None = None
     status: ProposalStatus = ProposalStatus.DRAFT
     approved_at: datetime | None = None
+    approved_by: str | None = None
+    approval_note: str | None = None
+    reviewed_at: datetime | None = Field(None, description="When Review stored its report on this version.")
+    opened_at: datetime | None = Field(
+        None, description="Last time a person opened this version (POST /proposals/{id}/open). Approval needs one after review.")
     created_at: datetime | None = None
     citation_rate: float = Field(ge=0, le=1, description="Share of sections with at least one valid KB citation.")
 
@@ -83,6 +89,7 @@ class ProposalSummary(Contract):
     sections_total: int
     sections_grounded: int
     sections_flagged: int
+    verdict: ReviewVerdict | None = Field(None, description="Review verdict; null until reviewed.")
 
 
 class ProposalRequest(Contract):
@@ -90,3 +97,28 @@ class ProposalRequest(Contract):
 
     force_english: bool | None = Field(
         None, description="Write in English whatever the notice language. Default: the PROPOSAL_FORCE_ENGLISH setting.")
+
+
+class ApprovalRequest(Contract):
+    """POST /proposals/{id}/approve: the human gate (no auth in the MVP, so the person names themselves)."""
+
+    approved_by: NonEmptyStr = Field(max_length=200)
+    note: str | None = Field(None, max_length=2000)
+
+
+class ChecklistItem(Contract):
+    """One row of the bid package's attachment checklist (export/content.py), from the notice + compliance + KB."""
+
+    document: NonEmptyStr = Field(description="Document as the notice names it.")
+    doc_type: DocType
+    mandatory: bool
+    fiscal_year_bs: str | None = None
+    status: ChecklistStatus
+    files: list[str] = Field(default_factory=list, description="KB documents attached for this row (filenames).")
+    document_ids: list[int] = Field(default_factory=list)
+    expires_on: date | None = Field(
+        None, description="Earliest expiry (AD) of the attached documents, or of the expired copy on file when missing.")
+    expires_on_bs: str | None = Field(None, description="The same date in BS (YYYY-MM-DD).")
+    rule_id: str | None = Field(None, description="Compliance rule that checked this document type.")
+    compliance_status: ComplianceStatus | None = Field(None, description="That rule's status in the compliance report.")
+    note: str = Field(description="What is on file, or what to do (plain language, dates in BS and AD).")

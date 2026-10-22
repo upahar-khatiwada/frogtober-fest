@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     # Write every proposal in English, whatever the notice language (default: en -> en, ne/mixed -> ne).
     proposal_force_english: bool = False
 
+    # --- Review (agents/review.py). Company policy, not procurement law. ---
+    # Verdict: fail if any model score is below fail_below; pass needs every score >= pass_min (and no failed check).
+    review_pass_min_score: int = 70
+    review_fail_below_score: int = 40
+    # A verdict other than pass feeds the gaps back to Proposal once (spec section 10.3), then stops for the person.
+    review_auto_revise: bool = True
+
     # --- Pipeline orchestrator (pipeline/orchestrator.py) ---
     # A queued/running run whose heartbeat is older than this is marked failed ("interrupted"). The heartbeat is
     # bumped per stage and per model call, so this must exceed one call with its retry (2 x LLM_TIMEOUT_S).

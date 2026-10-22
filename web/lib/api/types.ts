@@ -125,11 +125,12 @@ export interface paths {
         put?: never;
         /**
          * Generate Proposal
-         * @description Draft a new proposal version in the background (Review is not built yet, so the run ends at `drafted`).
+         * @description Draft a new proposal version, then review it, in the background (spec section 10.2: Proposal and Review).
          *
          *     Refused (409) while hard compliance failures are not overridden. Poll GET /runs/{id}: the Proposal stage
-         *     carries section-by-section `progress`. Every run stores a new version (GET /tenders/{id}/proposals); a drafted
-         *     or reviewed tender is drafted again from its compliance result.
+         *     carries section-by-section `progress`; the run ends `reviewed` (Review may add one revised version). Every run
+         *     stores a new version (GET /tenders/{id}/proposals); a drafted or reviewed tender is drafted again from its
+         *     compliance result. Approval is a separate human step (POST /proposals/{id}/approve).
          */
         post: operations["generate_proposal_tenders__tender_id__proposal_post"];
         delete?: never;
@@ -212,11 +213,31 @@ export interface paths {
         };
         /**
          * Get Proposal
-         * @description One proposal version: sections with their cited chunk ids, grounding and flags.
+         * @description One proposal version: sections with their cited chunk ids, grounding, flags and its review.
          */
         get: operations["get_proposal_proposals__proposal_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Proposal
+         * @description Record that a person opened this version. Approval needs an open after the version's review.
+         */
+        post: operations["open_proposal_proposals__proposal_id__open_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -233,10 +254,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Approve Proposal
-         * @description Human approval; sets status. This is the mandatory human gate (CLAUDE.md).
+         * Approve
+         * @description Human approval: sets the version `approved` (with who, when, note) and the tender `approved`.
+         *
+         *     This is the mandatory human gate (CLAUDE.md): refused while the review verdict is `fail` or the reviewed version
+         *     has not been opened. Every approval writes an agent_runs audit row (stage review, model "human").
          */
-        post: operations["approve_proposal_proposals__proposal_id__approve_post"];
+        post: operations["approve_proposals__proposal_id__approve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -252,7 +276,8 @@ export interface paths {
         };
         /**
          * Download Package
-         * @description Download submission package (export/package.py).
+         * @description The submission package of an approved version: bid package PDF + DOCX, attachment checklist (CSV), audit
+         *     summary (JSON) and the KB documents the checklist marks present. Built on demand; never sent anywhere.
          */
         get: operations["download_package_proposals__proposal_id__package_get"];
         put?: never;
@@ -447,6 +472,16 @@ export interface components {
              * @default []
              */
             methods: components["schemas"]["ProcurementMethod"][];
+        };
+        /**
+         * ApprovalRequest
+         * @description POST /proposals/{id}/approve: the human gate (no auth in the MVP, so the person names themselves).
+         */
+        ApprovalRequest: {
+            /** Approved By */
+            approved_by: string;
+            /** Note */
+            note?: string | null;
         };
         /** BidSecurity */
         BidSecurity: {
@@ -864,6 +899,11 @@ export interface components {
              */
             quote_found: boolean;
         };
+        /**
+         * GapSource
+         * @enum {string}
+         */
+        GapSource: "check" | "model";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1089,6 +1129,20 @@ export interface components {
             status: components["schemas"]["ProposalStatus"];
             /** Approved At */
             approved_at?: string | null;
+            /** Approved By */
+            approved_by?: string | null;
+            /** Approval Note */
+            approval_note?: string | null;
+            /**
+             * Reviewed At
+             * @description When Review stored its report on this version.
+             */
+            reviewed_at?: string | null;
+            /**
+             * Opened At
+             * @description Last time a person opened this version (POST /proposals/{id}/open). Approval needs one after review.
+             */
+            opened_at?: string | null;
             /** Created At */
             created_at?: string | null;
             /**
@@ -1181,6 +1235,8 @@ export interface components {
             sections_grounded: number;
             /** Sections Flagged */
             sections_flagged: number;
+            /** @description Review verdict; null until reviewed. */
+            verdict?: components["schemas"]["ReviewVerdict"] | null;
         };
         /**
          * Province
@@ -1245,6 +1301,25 @@ export interface components {
             source: string;
         };
         /**
+         * ReviewCheck
+         * @description One deterministic check (code, hard rule 5).
+         */
+        ReviewCheck: {
+            check: components["schemas"]["ReviewCheckId"];
+            /** Passed */
+            passed: boolean;
+            /** @description hard: a failure makes the verdict fail; soft: needs_work. */
+            severity: components["schemas"]["Severity"];
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * ReviewCheckId
+         * @description Deterministic Review checks (hard rule 5). JSONB only.
+         * @enum {string}
+         */
+        ReviewCheckId: "mandatory_addressed" | "no_placeholders" | "bid_security_stated" | "deadline_not_passed" | "sections_cited";
+        /**
          * ReviewFlag
          * @description A field code could not confirm. The raw string is kept; the value is left null rather than guessed.
          */
@@ -1256,40 +1331,92 @@ export interface components {
             /** Raw */
             raw?: string | null;
         };
-        /** ReviewGap */
+        /**
+         * ReviewGap
+         * @description A stored gap: from a deterministic check or the model. Always tied to a requirement, a section or a check.
+         */
         ReviewGap: {
-            /**
-             * Section Title
-             * @description Proposal section the gap is in; null if proposal-wide.
-             */
-            section_title?: string | null;
+            source: components["schemas"]["GapSource"];
+            check?: components["schemas"]["ReviewCheckId"] | null;
+            /** Requirement Index */
+            requirement_index?: number | null;
+            /** Section Key */
+            section_key?: string | null;
             /** Issue */
             issue: string;
             severity: components["schemas"]["Severity"];
             /** Suggestion */
             suggestion?: string | null;
         };
-        /** ReviewReport */
+        /**
+         * ReviewReport
+         * @description Stored on the reviewed proposal version (`proposals.review_json`).
+         */
         ReviewReport: {
+            /** @description The model's scores. */
             scores: components["schemas"]["ReviewScores"];
+            /** Checks */
+            checks?: components["schemas"]["ReviewCheck"][];
             /** Gaps */
             gaps?: components["schemas"]["ReviewGap"][];
+            /**
+             * Uncited Sections
+             * @description Section keys with no valid KB citation.
+             */
+            uncited_sections?: string[];
+            /** @description Computed by code from the checks, the gaps and the scores. */
             verdict: components["schemas"]["ReviewVerdict"];
+            /** Verdict Reasons */
+            verdict_reasons?: string[];
+            /**
+             * Pass Min Score
+             * @description REVIEW_PASS_MIN_SCORE when the verdict was computed.
+             * @default 70
+             */
+            pass_min_score: number;
+            /**
+             * Fail Below Score
+             * @description REVIEW_FAIL_BELOW_SCORE when the verdict was computed.
+             * @default 40
+             */
+            fail_below_score: number;
+            /**
+             * Revision Of
+             * @description Version this one revised automatically, if it is a revision.
+             */
+            revision_of?: number | null;
+            /**
+             * Revised Sections
+             * @description Sections redrafted from the review's gaps.
+             */
+            revised_sections?: string[];
+            /** @description Verdict of the version this one revised. */
+            previous_verdict?: components["schemas"]["ReviewVerdict"] | null;
         };
         /** ReviewScores */
         ReviewScores: {
-            /** Completeness */
+            /**
+             * Completeness
+             * @description Every tender requirement and section purpose is answered.
+             */
             completeness: number;
-            /** Relevance */
+            /**
+             * Relevance
+             * @description Specific to this tender's scope and buyer, not generic text.
+             */
             relevance: number;
-            /** Compliance */
+            /**
+             * Compliance
+             * @description Consistent with the requirements; claims nothing they contradict.
+             */
             compliance: number;
         };
         /**
          * ReviewVerdict
+         * @description Computed by code (agents.review.decide_verdict). JSONB only, so no CHECK constraint.
          * @enum {string}
          */
-        ReviewVerdict: "pass" | "fail";
+        ReviewVerdict: "pass" | "needs_work" | "fail";
         /** Rule */
         Rule: {
             /** Id */
@@ -2147,7 +2274,7 @@ export interface operations {
             };
         };
     };
-    approve_proposal_proposals__proposal_id__approve_post: {
+    open_proposal_proposals__proposal_id__open_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2167,6 +2294,13 @@ export interface operations {
                     "application/json": components["schemas"]["Proposal"];
                 };
             };
+            /** @description No such proposal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2176,12 +2310,54 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Not implemented yet */
-            501: {
+        };
+    };
+    approve_proposals__proposal_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Proposal"];
+                };
+            };
+            /** @description No such proposal */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Not reviewed, verdict fail, not opened since its review, tender not reviewed, a run is active, or already approved */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -2196,6 +2372,29 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The submission package (ZIP) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": unknown;
+                };
+            };
+            /** @description No such proposal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The version is not approved */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2203,15 +2402,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Successful Response */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
         };

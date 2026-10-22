@@ -333,3 +333,40 @@ The Proposal agent (`api/agents/proposal.py`) writes the bidder's narrative sect
 **Dates:** when the notice wrote a BS date (its deadline, or any BS year 2060–2099 in the text), dates in the proposal show both calendars: `5 Mangsir 2083 BS (21 November 2026 AD), 12:00 NPT`, or in Nepali `५ मंसिर २०८३ (२०२६-११-२१)`. Otherwise they are AD only. Conversion uses the same lookup table (§7). Money uses lakh/crore grouping (`Rs 1,48,75,000`, `रु. १,४८,७५,०००`, §9).
 
 **Not encoded:** the order or wording of PPMO SBD sections `[VERIFY]` against a current SBD. The templates follow the evaluation criteria above, not a form.
+
+## 16. Bid package contents (as implemented, Prompt 10)
+
+`GET /proposals/{id}/package` builds a ZIP for an **approved** proposal version (`api/export/`). Tenderly never submits it (hard rule 6): the person submits it through the procuring entity's channel, e.g. the PPMO e-GP system (§6). The documents are in the proposal's language (English, or Nepali for `ne`/`mixed` notices, §15).
+
+| File | Contents |
+|---|---|
+| `01_<stem>.pdf` / `.docx` | The bid package below. The PDF embeds Noto Sans + Noto Sans Devanagari, is HarfBuzz-shaped, and extracts as the same Unicode. The DOCX is the editable copy. |
+| `02_attachment_checklist.csv` | One row per document (UTF-8 with BOM for Excel). |
+| `03_audit_summary.json` | Tender, proposal, review, approval (who/when), compliance report and override, checklist, every `agent_runs` row, file hashes, `submitted: false`. |
+| `attachments/` | The KB originals of documents the checklist marks present or expiring. |
+
+**Inside the PDF/DOCX:**
+
+0. **Internal cover sheet** (marked "remove before submission"): tender, reference, entity, deadline (BS + AD), bidder, PAN/VAT, proposal version, review verdict, approval.
+1. **Cover letter**: date (BS + AD), the procuring entity, subject "Submission of bid for <title> (Ref. <no.>)", the body (the proposal's `cover_letter` section), and a signature block (name, designation, signature and seal, date).
+2. **Bid form (skeleton)**:
+   - the usual undertakings:
+     - bidding document and addenda examined;
+     - offer at a total price;
+     - bid validity in days from the deadline (§4, PPA §20);
+     - bid security amount and valid-until (from the notice / `calc_bid_security`, §4);
+     - performance security % if the notice states one (else "as the bidding document requires", PPR Rule 110(2));
+     - one bid per bidder alone or in a JV (PPR Rule 28(1), §3);
+     - the entity is not bound to accept the lowest bid;
+   - a bidder-information table.
+   - **Price, addenda numbers and signatory are left blank**: Tenderly never writes a price. It is marked as a convenience copy: the bidding document's own form is the authority. Wording follows common SBD practice `[VERIFY]` against a current PPMO SBD.
+3. **Declarations**: the PPR Rule 40(2)(e) self-declaration (eligible, not disqualified; not punished for a professional or business offence; no conflict of interest), not blacklisted/debarred (PPR Rules 39, 141, §3), no corrupt/fraudulent/collusive/coercive practice, and the information is true, with a signature block. Use the bidding document's declaration form if it has one.
+4. **Technical proposal**: the remaining proposal sections (§15), each with its KB chunk citations and any review flags. Unresolved `[MISSING: …]` markers stay visible.
+5. **Attachment checklist**: every document the notice lists, plus the statutory eligibility documents of PPR Rule 40(2)(a)–(c),(e) the notice did not list (registration, business/construction licence, PAN/VAT, self-declaration). Columns: document, status, file(s), valid until (BS / AD), notes. Matching uses the same logic as the compliance rules (§12):
+   - **present**: a readable (chunked), unexpired document of that type (and of the notice's fiscal year for tax clearance / tax return / audit report; that FY or later for a licence renewal) that stays valid through deadline + bid validity days;
+   - **expiring**: valid at the deadline but lapsing before deadline + bid validity (NP-DOC-VALIDITY, §12, `[VERIFY]` whether documents must stay valid that long);
+   - **missing**: none on file, only expired copies, only other fiscal years (listed with their expiry), a scanned copy with no text, or a per-bid form (self-declaration, power of attorney: sign the one in this package). A bid-security row names the amount and the valid-until date to arrange. The compliance rule's `action_needed` is appended. A tax-return proof for the notice's FY satisfies a tax-clearance row (Rule 40(2)(d)).
+
+**Dates** in the package always carry both calendars: long form `5 Mangsir 2083 BS (21 November 2026 AD)` (`५ मंसिर २०८३ (२०२६-११-२१)` in Nepali), and in the checklist `2084-03-32 BS / 2027-07-16 AD`. Conversion uses the same lookup table (§7, `[VERIFY]` 2084+). The Nepali fixed text was written by the model, not a native reader `[VERIFY]`.
+
+**Approval gate before export (agents/review.py):** a version is exported only after a person approves it. Approval needs a review whose verdict is not `fail`, plus an explicit open of the version after its review. Review's deterministic checks are: every mandatory requirement answered, no placeholders, bid security stated when the notice asks for one, deadline not passed (NPT), sections cite the KB. Thresholds are company policy (`REVIEW_PASS_MIN_SCORE` 70, `REVIEW_FAIL_BELOW_SCORE` 40), not law.

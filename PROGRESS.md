@@ -286,6 +286,93 @@
     - metric arithmetic and offline CLI.
   - Updated: `test_compliance_api` (proposal 501 → 202 run ending `drafted`), `test_orchestrator` / `test_tenders_list_api` (the "not implemented" target is now `reviewed`), `test_schemas` (draft vs stored section).
 
+### Prompt 10: Review agent, revision pass, approval gate, bid package export (2026-10-22) ✅ (offline). Real-model review NOT run
+- Read spec §5.1, §8.1, §10.2 and §12 (Days 9–10) this session, from the PDF.
+- **`agents/review.py`:**
+  - **Deterministic checks (`run_checks`, hard rule 5):**
+    - `mandatory_addressed` (hard): every mandatory requirement is routed to a section that was actually drafted, not a `no_kb_material` stub;
+    - `no_placeholders` (soft): no `[MISSING/UNKNOWN/UNVERIFIED: …]`, `⟦unsourced: …⟧`, leftover `{{…}}`, `[insert …]`, `TBD` or `XXX`;
+    - `bid_security_stated` (soft): the notice asks for bid security and some section says it is enclosed (English and Nepali wording);
+    - `deadline_not_passed` (hard; an unknown deadline is soft);
+    - `sections_cited` (soft, hard rule 8).
+    - Every failure becomes a `ReviewGap` tied to a requirement index, a section key or its check.
+  - **Model (`review_proposal`):** one `ReviewAssessment` call at temperature 0 gives 3 scores (0–100) plus gaps. The schema is narrowed per proposal (`assessment_schema`): `section_key` is an enum of the proposal's own keys and `requirement_index` is bounded, so Ollama's grammar cannot name a section that does not exist, and an untied gap is invalid. The prompt tells the model what code already checks.
+  - **Verdict (`decide_verdict`, code):** `fail` on a failed hard check or any score < `REVIEW_FAIL_BELOW_SCORE` (40); `needs_work` on a failed soft check, a score < `REVIEW_PASS_MIN_SCORE` (70) or a hard model gap; otherwise `pass`. Every reason is prefixed `[check]` or `[model]`.
+  - **Revision pass (`run_review`):** when the verdict is not `pass` and `REVIEW_AUTO_REVISE` is on (the default), `revision_feedback` maps gaps to sections (a requirement gap goes to the section that answers it; the deadline gap is never fed back). `agents.proposal.revise_proposal` then redrafts only those sections, with the reviewer's points and the previous draft in the prompt, and stores the result as the next version (same language; the other sections are copied). The revision is reviewed once and the report records `revision_of`, `revised_sections` and `previous_verdict`. Then it stops for the person.
+  - On an LLM error nothing partial is kept, and the tender becomes `failed`. `resume_status` now returns `drafted` when a proposal version is stored, so a failed Review resumes at Review only.
+  - Agent_runs rows: one `deterministic` row per review (checks + verdict), model rows from the client, and the revision's rows under stage `proposal`.
+- **Human gate (`approve_proposal`):** `POST /proposals/{id}/approve` (`ApprovalRequest {approved_by, note}`) answers 409 with every blocker listed:
+  - the version is not reviewed;
+  - the verdict is `fail`;
+  - the version has not been opened since its review (`POST /proposals/{id}/open` sets `opened_at`; it must be ≥ `reviewed_at`);
+  - the tender is not `reviewed`;
+  - a run is active;
+  - it is already approved.
+  - On success it sets the version `approved` (`approved_at/by`, note), the tender `approved`, and writes an **audit row in agent_runs** (stage `review`, model `human`, output = who/when/verdict/opened/reviewed). An approved tender is never re-run (`plan_run` refuses even with `from_stage`).
+- **Export (`api/export/`):**
+  - `content.py` builds one document model (blocks) that both renderers use:
+    - an internal cover sheet;
+    - the cover letter (body = the proposal's `cover_letter` section);
+    - a bid-form skeleton (the notice's validity / bid security / performance security %, blanks for price and signatory; never a price);
+    - declarations (PPR Rule 40(2)(e) plus blacklisting, collusion and truthfulness);
+    - the technical proposal (sections with KB chunk citations and review flags);
+    - the attachment checklist.
+    - Fixed text exists in English and Nepali.
+  - `build_checklist` gives one row per notice document, plus the statutory Rule 40(2) documents the notice did not list. Rows are `present` / `expiring` (valid at the deadline but lapsing before deadline + bid validity) / `missing`, matched like the compliance rules (FY, tax-return alternative, readable = has a chunk). Each row carries the rule id and status, files, and expiry in BS and AD; a missing row's note includes the compliance `action_needed`.
+  - `pdf.py`: ReportLab + **HarfBuzz shaping** with embedded Noto Sans + Noto Sans Devanagari (regular and bold, `export/fonts/`, OFL). Devanagari runs are put in the Devanagari font.
+  - `shaping.py` patches four ReportLab internals:
+    - per-font-run shaping (mixed-script words drew wrong glyphs);
+    - Latin ligatures off;
+    - `/ActualText` per cluster so the PDF extracts as the same Unicode;
+    - cluster-aware splitting of words too wide for a column.
+  - `docx.py`: python-docx with `w:rFonts w:cs` = Noto Sans Devanagari, `bCs`/`iCs`/`szCs` and `lang bidi=ne-NP`; rPr children are kept in schema order.
+  - `package.py` builds the ZIP:
+    - `01_<stem>.pdf` and `.docx`;
+    - `02_attachment_checklist.csv` (UTF-8 BOM);
+    - `03_audit_summary.json` (`submitted: false`, tender, proposal, review, approval, compliance, checklist, every agent_runs row, file sha256s);
+    - `attachments/<id>_<file>`: the KB originals of present/expiring rows.
+  - `GET /proposals/{id}/package` returns 409 unless the version is approved.
+- **Schemas:**
+  - `ReviewVerdict.needs_work`; new `ReviewCheckId`, `GapSource`, `ChecklistStatus` (JSONB only, so no CHECK);
+  - `ReviewAssessment` / `ReviewGapDraft` (LLM) and `ReviewCheck`;
+  - `ReviewGap` and `ReviewReport` reworked (checks, gaps tied to requirement/section/check, verdict reasons, thresholds, revision fields);
+  - `Proposal` gained `approved_by`, `approval_note`, `reviewed_at`, `opened_at`; `ProposalSummary.verdict`;
+  - new `ApprovalRequest` and `ChecklistItem`.
+- **DB (migration `0005`):** `proposals.approved_by`, `approval_note`, `reviewed_at`, `opened_at`.
+- **Orchestrator / API:**
+  - `default_runners[REVIEW] = run_review`;
+  - `POST /tenders/{id}/proposal` now runs **Proposal and Review** (target `reviewed`, spec §10.2); a failed tender with a draft is re-drafted;
+  - `plan_run` lets a drafted tender move forward to `reviewed` without `from_stage`.
+  - `web/lib/api/types.ts` regenerated; `bunx tsc --noEmit`, `bun run lint` and vitest (77) pass. No web UI for review/approval yet.
+- **Deps:** `reportlab` 5.1 (BSD) and `uharfbuzz` 0.56 (Apache-2.0, HarfBuzz bindings). Audited: no network or model use. Fonts vendored with `OFL.txt` and a source README. WeasyPrint was not used because it needs Pango/GTK system libraries, which this Windows machine lacks.
+- **Devanagari PDF, measured:**
+  - All **24 seed notices that contain Devanagari** render and extract back **exactly** (NFC, whitespace folded).
+  - So do hard clusters: च्छि, the reph र्य, लि, क्ष, श्री, द्ध, ह्व.
+  - The fonts are embedded as TrueType subsets.
+  - Pages were checked by eye at 250 dpi (PNG renders): conjuncts, reph and the ि matra are placed correctly. Without the ActualText layer the same PDF extracts private-use glyph codes; a test proves this.
+- **Tests:** `uv run pytest -q` gives **730 passed, 4 deselected** (was 650).
+  - `test_review.py` (39):
+    - each check, including Nepali bid-security wording and ordinary brackets that are not placeholders;
+    - a verdict matrix (10 cases);
+    - the narrowed schema (an unknown section or out-of-range requirement is invalid, and the enum reaches Ollama's `format`);
+    - one call at temperature 0, and invalid output twice raises;
+    - feedback routing;
+    - pass with no revision; needs_work → exactly one revision of only the named sections, then a second review;
+    - auto-revise off;
+    - failure → `failed`, then resume at Review only;
+    - a route test (proposal → review);
+    - **approval gating**: draft, not opened, opened before the review, verdict fail, success with the audit row, already approved, and an approved tender cannot be re-run or re-drafted.
+  - `test_export.py` (41):
+    - checklist statuses and BS/AD notes (expired FY 2081/82 clearance, expiring licence, tax-return alternative, statutory rows, unreadable scan, Nepali digits);
+    - package order and contents (no price; notice figures);
+    - Markdown parsing;
+    - **Devanagari PDF extraction**: every Devanagari word of the package; no private-use or missing glyphs; embedded fonts; ActualText spans; 24 seed round trips; hard clusters; long words in narrow cells;
+    - no Latin ligatures;
+    - DOCX Devanagari, `cs` fonts, `bCs` and rPr order;
+    - **the ZIP route** (409 before approval; contents; CSV; attachments byte-identical; audit hashes; the PDF inside is Nepali).
+  - Updated: `test_schemas` (ReviewAssessment / ReviewReport rules), `test_proposal` (DraftFake answers Review; the API run is proposal + review), `test_compliance_api` (ends `reviewed`), `test_orchestrator` (missing-runner and approved refusals), `test_tenders_list_api` (an approved tender is refused).
+- **Not run:** Review against a real model (no Ollama here, same as issues 35/40/44/66), and Word/LibreOffice opening the DOCX (python-docx reads it back; schema order is tested).
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -380,6 +467,18 @@
 - **Every Proposal run is a new version;** none is overwritten or deleted. The orchestrator rewinds a drafted/reviewed tender to checked and re-drafts (`from_stage=proposal`).
 - **Progress through the run, not a new table:** `StageRun.progress` in the existing `pipeline_runs.stages` JSONB, published via a ContextVar callback so agents stay orchestrator-agnostic.
 
+- **Review: the LLM scores, code decides (Prompt 10).** `ReviewAssessment` has no verdict field. The verdict is computed from deterministic checks + scores with configurable thresholds (company policy, not law). A model gap alone can make a proposal `needs_work` but never `fail`; only a failed hard check or a very low score fails it.
+- **The Review schema is narrowed per proposal** (enum of section keys, bounded requirement index), so "tied to a requirement or section" is enforced by the grammar and strict validation, not by silently dropping bad references (hard rule 4).
+- **`needs_work` is approvable, `fail` is not.** The task asks to refuse only `fail`. Unresolved placeholders stay visible in the export rather than being filled in.
+- **Revision = a new version**, of only the sections the gaps name, at the proposal temperature, in the reviewed version's language. Both versions keep their reviews. Exactly one revision per Review run, then the person decides.
+- **"Opened" = `POST /proposals/{id}/open`** (the UI calls it when it shows the version), not a side effect of GET. It must postdate the review, so a person approves only what they have seen with its verdict.
+- **The approval audit row goes in `agent_runs`** (stage `review`, model `human`) rather than a new table or a new `Stage` value. A new Stage would leak into `AnalyzeRequest.from_stage` and the web enum lists. The audit summary in the package lists every row.
+- **PDF engine: ReportLab + uharfbuzz, not WeasyPrint.** It is pure pip with no system libraries, and HarfBuzz shapes Devanagari correctly. ReportLab's shaped output is not extractable out of the box (private-use glyph codes, wrong glyphs in mixed-script words), so `export/shaping.py` patches four internals. The version is pinned below 6, and extraction tests guard it.
+- **ActualText granularity:** per cluster. A cluster with as many glyphs as base+mark units (च्छि = च् + छि) gets one span per glyph, because MuPDF gives the extra characters of a multi-glyph span zero width and the gap then reads as a break. Whole-word spans duplicate text after a reordered ि; spans that absorb the next cluster fail 26 of 38 texts. Both alternatives were measured.
+- **The checklist matches documents like the rules do** (FY, tax-return alternative, readable = chunk) and shows the compliance rule's status next to its own. A rule failing for another document type (NP-REG-DOCS) does not mark a present document missing.
+- **The bid form is a skeleton**, with blanks for price and signatory: the bidding document's own form is the authority (NEPAL_CONTEXT §15/§16). The package's first page is an internal sheet marked "remove before submission".
+- **The package is built on demand** from stored rows (no file storage); the ZIP is dated by the injected clock.
+
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
 - `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
@@ -400,6 +499,11 @@
 - §9.1 (frontend prompt): `/runs` is a placeholder and `/tenders/[id]` and `/tenders/[id]/proposal` do not exist yet. Dashboard rows show reasons and hard-failure counts but do not link anywhere.
 - §9.1 `/tenders/[id]` exists. `/tenders/[id]/proposal` and the real `/runs` page do not yet. §10.2: two read-only additions, `GET /rules` and `GET /chunks`.
 - §10.2 (Prompt 9): `POST /tenders/{id}/proposal` returns 202 + a pipeline run (not a `Proposal`) and runs Proposal only. Review is not built, so the run stops at `drafted`. New read routes: `GET /tenders/{id}/proposals`, `GET /proposals/{id}`. §8.1: the LLM fills `ProposalSectionDraft`; code builds `ProposalSection`. §11: `proposals.language`.
+- Prompt 10:
+  - §10.2: `POST /tenders/{id}/proposal` now runs Proposal + Review (202 + run, ends `reviewed`). New `POST /proposals/{id}/open`. `/approve` takes a body (`approved_by`, `note`).
+  - §8.1: the LLM fills `ReviewAssessment`; code builds `ReviewReport`, which has the extra verdict `needs_work`.
+  - §11: `proposals.approved_by`, `approval_note`, `reviewed_at`, `opened_at`.
+  - The spec offered "WeasyPrint or ReportLab": ReportLab is used, with HarfBuzz shaping (+ uharfbuzz).
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -503,7 +607,19 @@ New (Prompt 9):
 71. Placeholders use the **first** licence and JV partner in the profile, and `company.turnover_average` uses the profile's latest 3 FYs (as Matching does), not the notice's look-back. Enough for the demo company; multi-licence firms need named placeholders.
 72. The replay cache (`precache_demo`) does not record Proposal yet. Extend it to `target=drafted` once the prompts settle (issue 50).
 
+New (Prompt 10):
+73. ~~Issues 54/70 (Review, revision pass, approval)~~: done in Prompt 10.
+74. **Review has never run against a real model.** With Ollama up: `uv run pytest -m ollama`. Does the grammar accept the narrowed `ReviewAssessment` (an enum inside `anyOf`)? Then run analyze + proposal on 001 and check the scores are not uniformly high. The thresholds (70/40) are first guesses; tune them on real reviews.
+75. Review prompt size: sections are cut to 1000 characters each. A long Nepali proposal (9 sections) is about 5–6k tokens with `LLM_NUM_CTX=8192`; watch for truncation.
+76. **No web UI** for the review report, the open/approve flow or the package download (spec §9.1 `/tenders/[id]/proposal`, issue 69). The API is ready: call `POST /proposals/{id}/open` when the version is shown, then `/approve`, then `GET /proposals/{id}/package`.
+77. The Nepali fixed text of the package (cover sheet, bid form, declarations, checklist notes, document names) was written by the model `[VERIFY]` with a native reader (issue 60). Compliance `action_needed` text stays English inside Nepali notes.
+78. The bid-form and declaration wording follows PPR-EN Rule 40(2)(e) / Rule 28(1) and common practice, not a current PPMO SBD `[VERIFY]` (NEPAL_CONTEXT §16).
+79. `export/shaping.py` patches ReportLab internals: re-run `tests/test_export.py` on any ReportLab/uharfbuzz upgrade (pinned `reportlab>=5.1,<6`). Extraction is verified with PyMuPDF only; other extractors (pdftotext, Acrobat copy/paste) were not tried. Only `Paragraph` text is shaped; canvas text (the footer) is Latin-only by design.
+80. The DOCX was not opened in Word or LibreOffice (none here). Word needs Noto Sans Devanagari installed to match the PDF, else it falls back to a system Devanagari font.
+81. The replay cache (`precache_demo`, issue 72) does not record Proposal/Review. Extend it to `target=reviewed` once the prompts settle, so the demo can show the whole flow offline.
+82. Approval has no authentication (single-company MVP): `approved_by` is whatever the person types, the same as the compliance override.
+
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
-With Ollama up: measure the proposal citation rate (`score_proposal --llm`, issue 66) and the outstanding Scout/Matching/Compliance numbers (35, 40, 44). Then the Review agent (`agents/review.py`: `ReviewReport` at temp 0 over sections + requirements, reading `ProposalSection.flags`/`grounded`; verdict fail → one revision pass; `POST /proposals/{id}/approve` as the human `reviewed → approved` edge, issue 54/70), and on the frontend the `/tenders/[id]/proposal` page showing versions, per-section flags and citations (issue 69).
+With Ollama up: measure the outstanding numbers (Scout 35, Matching 40, Compliance 44, Proposal citation rate 66) and run Review on 001 (issue 74), then extend the pre-cache to `reviewed` (issue 81). On the frontend: the `/tenders/[id]/proposal` page with versions, per-section flags, citations, the review panel (scores, checks, gaps, verdict reasons), Open → Approve (name + note; disabled on `fail` with the reasons) and the package download (issues 69/76).

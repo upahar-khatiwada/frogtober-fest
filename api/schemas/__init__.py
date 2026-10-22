@@ -3,7 +3,7 @@
 These are the contract between stages: code routes, filters, blocks and
 gates on them. Models the LLM fills (passed as `schema=` to
 `pipeline.llm.LLMClient.chat`): TenderExtraction, MatchAssessment,
-ComplianceAssessment, ProposalSectionDraft, ReviewReport. The rest are built
+ComplianceAssessment, ProposalSectionDraft, ReviewAssessment. The rest are built
 by code or entered by the user.
 """
 
@@ -12,10 +12,12 @@ from schemas.compliance import (ComplianceAssessment, ComplianceItem, Compliance
                                 ComplianceReport, ComplianceView)
 from schemas.enums import (
     BuyerLevel,
+    ChecklistStatus,
     ComplianceStatus,
     ContractorClass,
     DocType,
     EvaluationMethod,
+    GapSource,
     IngestStatus,
     ItemSource,
     MatchDecision,
@@ -26,6 +28,7 @@ from schemas.enums import (
     ProposalStatus,
     Province,
     RequirementCategory,
+    ReviewCheckId,
     ReviewVerdict,
     RunStatus,
     SectionFlagKind,
@@ -38,9 +41,9 @@ from schemas.enums import (
     TenderStatus,
 )
 from schemas.match import MatchAssessment, MatchResult, MatchSignal
-from schemas.proposal import (Proposal, ProposalRequest, ProposalSection, ProposalSectionDraft, ProposalSummary,
-                              ResolvedPlaceholder, SectionFact, SectionFlag)
-from schemas.review import ReviewGap, ReviewReport, ReviewScores
+from schemas.proposal import (ApprovalRequest, ChecklistItem, Proposal, ProposalRequest, ProposalSection, ProposalSectionDraft,
+                              ProposalSummary, ResolvedPlaceholder, SectionFact, SectionFlag)
+from schemas.review import ReviewAssessment, ReviewCheck, ReviewGap, ReviewGapDraft, ReviewReport, ReviewScores
 from schemas.runs import (AgentRun, AgentRunRecord, AnalyzeRequest, PipelineRunDetail, PipelineRunView, ProgressItem,
                           StageProgress, StageRun)
 from schemas.scout import ExtractedDoc, Grounded, TenderExtraction
@@ -50,6 +53,14 @@ from schemas.views import (CompanyDocumentView, CompanyView, DeadlineView, Scrap
                            TenderDetail, TenderListItem)
 
 __all__ = [
+    "ApprovalRequest",
+    "ChecklistItem",
+    "ChecklistStatus",
+    "GapSource",
+    "ReviewAssessment",
+    "ReviewCheck",
+    "ReviewCheckId",
+    "ReviewGapDraft",
     "TenderExtraction",
     "TenderCriteria",
     "SecurityCalc",

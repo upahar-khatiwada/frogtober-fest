@@ -23,7 +23,9 @@ Language: the notice's (`en` -> English; `ne` and `mixed` -> Nepali) unless Engl
 (`PROPOSAL_FORCE_ENGLISH` or the request). Dates render in BS and AD when the notice used BS.
 
 `run_proposal` stores a new `proposals` version (old ones are kept) and sets the tender `drafted`, or `failed`
-if a model or embedding call fails (no partial version is stored).
+if a model or embedding call fails (no partial version is stored). `revise_proposal` is the Review stage's one
+automatic revision pass (spec section 10.3): the sections the review's gaps point at are redrafted with that feedback,
+the rest are copied, and the result is stored as the next version.
 """
 
 import hashlib
@@ -115,8 +117,9 @@ TEMPLATES: dict[str, SectionTemplate] = {t.key: t for t in (
     SectionTemplate("declarations", "Declarations", "घोषणा",
                     "self-declaration, not blacklisted, no conflict of interest, eligible to bid, power of attorney",
                     "The bidder's declarations: eligible to bid, not blacklisted or debarred, no conflict of interest, "
-                    "bid valid for {{tender.bid_validity_days}} days. State that the signed forms of the bidding document "
-                    "are attached; do not invent signatories."),
+                    "bid valid for {{tender.bid_validity_days}} days. If the notice asks for bid security, state that a "
+                    "bid security of {{tender.bid_security}} is enclosed. State that the signed forms of the bidding "
+                    "document are attached; do not invent signatories."),
     SectionTemplate("understanding_tor", "Understanding of the Terms of Reference", "कार्यादेश (ToR) को बुझाइ",
                     "understanding of the assignment, objectives, scope of services, deliverables",
                     "The objectives and scope of the assignment in the company's words, and what matters most for "
@@ -405,7 +408,12 @@ _LANGUAGE_NAME = {ProposalLanguage.EN: "English", ProposalLanguage.NE: "Nepali (
 _CHUNK_CHARS = 900
 
 
-def build_messages(section: PlannedSection, ctx: ProposalContext, chunks: Sequence[ChunkHit]) -> list[dict[str, str]]:
+_FEEDBACK_CHARS = 1500
+
+
+def build_messages(section: PlannedSection, ctx: ProposalContext, chunks: Sequence[ChunkHit], *,
+                   feedback: Sequence[str] = (), previous: str | None = None) -> list[dict[str, str]]:
+    """The section prompt. A revision adds the reviewer's points and the previous draft (with its placeholders)."""
     record = ctx.record
     reqs = "\n".join(f"- ({'mandatory' if record.requirements[i].mandatory else 'optional'}) {record.requirements[i].text}"
                      for i in section.requirement_indices) or "- (none specific; follow the section guidance)"
@@ -419,6 +427,12 @@ def build_messages(section: PlannedSection, ctx: ProposalContext, chunks: Sequen
             f"COMPANY\n{ctx.company.name}; sectors: {', '.join(ctx.company.sectors) or '-'}\n\n"
             f"PLACEHOLDERS (code fills the values)\n{available}\n\n"
             f"KNOWLEDGE BASE EXCERPTS\n{kb}")
+    if feedback:
+        points = "\n".join(f"- {point}" for point in feedback)
+        user += (f"\n\nREVIEWER FEEDBACK ON THE PREVIOUS DRAFT (fix these points; still use only the excerpts, and "
+                 f"name in \"missing\" what they cannot support)\n{points}")
+        if previous:
+            user += f"\n\nPREVIOUS DRAFT\n{previous[:_FEEDBACK_CHARS]}"
     system = SYSTEM_PROMPT.format(language=_LANGUAGE_NAME[ctx.language])
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -475,16 +489,18 @@ def build_section(section: PlannedSection, draft: ProposalSectionDraft | None, c
 RetrieveFn = Callable[[str], list[ChunkHit]]
 
 
-def generate_section(client: LLMClient, section: PlannedSection, ctx: ProposalContext, retrieve_fn: RetrieveFn
-                     ) -> ProposalSection:
+def generate_section(client: LLMClient, section: PlannedSection, ctx: ProposalContext, retrieve_fn: RetrieveFn, *,
+                     feedback: Sequence[str] = (), previous: str | None = None) -> ProposalSection:
     """Retrieve for this section, draft it (one schema-constrained call), and render it in code.
 
     No chunk retrieved -> no model call and a flagged stub. Raises LLMError (its agent_runs row is already recorded).
+    `feedback` / `previous` turn the call into a revision of an earlier draft (Review's revision pass).
     """
     chunks = retrieve_fn(section_query(section, ctx.record))
     if not chunks:
         return build_section(section, None, chunks, ctx)
-    draft = client.chat(stage=Stage.PROPOSAL, messages=build_messages(section, ctx, chunks),
+    draft = client.chat(stage=Stage.PROPOSAL,
+                        messages=build_messages(section, ctx, chunks, feedback=feedback, previous=previous),
                         schema=ProposalSectionDraft, tender_id=ctx.tender_id)
     return build_section(section, draft, chunks, ctx)
 
@@ -535,7 +551,8 @@ def can_draft(session: Session, tender: Tender) -> tuple[bool, str]:
         from pipeline.orchestrator import resume_status  # the orchestrator imports this module
 
         view = compliance_view(session, tender.id)
-        if resume_status(session, tender) is TenderStatus.CHECKED and view is not None and view.proposal_allowed:
+        resume = resume_status(session, tender)
+        if resume in (TenderStatus.CHECKED, TenderStatus.DRAFTED) and view is not None and view.proposal_allowed:
             return True, "ok"
     return proposal_allowed(session, tender)
 
@@ -544,8 +561,9 @@ def proposal_from_row(row: ProposalRow) -> Proposal:
     sections = [ProposalSection.model_validate(s) for s in row.sections]
     return Proposal(id=row.id, tender_id=row.tender_id, version=row.version,
                     language=row.language or ProposalLanguage.EN, sections=sections, review=row.review_json,
-                    status=row.status, approved_at=row.approved_at, created_at=row.created_at,
-                    citation_rate=citation_rate(sections))
+                    status=row.status, approved_at=row.approved_at, approved_by=row.approved_by,
+                    approval_note=row.approval_note, reviewed_at=row.reviewed_at, opened_at=row.opened_at,
+                    created_at=row.created_at, citation_rate=citation_rate(sections))
 
 
 def summary_from_row(row: ProposalRow) -> ProposalSummary:
@@ -553,7 +571,8 @@ def summary_from_row(row: ProposalRow) -> ProposalSummary:
     return ProposalSummary(id=row.id, version=row.version, language=row.language or ProposalLanguage.EN,
                            status=row.status, created_at=row.created_at, sections_total=len(sections),
                            sections_grounded=sum(s.grounded for s in sections),
-                           sections_flagged=sum(bool(s.flags) for s in sections))
+                           sections_flagged=sum(bool(s.flags) for s in sections),
+                           verdict=(row.review_json or {}).get("verdict"))
 
 
 def list_proposals(session: Session, tender_id: int) -> list[ProposalRow]:
@@ -577,6 +596,36 @@ def _record_code_run(session: Session, tender: Tender, payload: dict[str, Any], 
     ))
 
 
+def proposal_context(session: Session, tender: Tender, *, now: datetime | None = None,
+                     language: ProposalLanguage | None = None, force_english: bool = False) -> tuple[Any, ProposalContext]:
+    """(company row, context) for drafting or revising. `language` pins it (a revision keeps its version's language)."""
+    loaded = load_company(session)
+    if loaded is None:
+        raise ValueError("no company profile; POST /company first")
+    company_row, company = loaded
+    record = TenderRecord.model_validate(tender.record_json)
+    ctx = ProposalContext(record=record, company=company,
+                          language=language or proposal_language(record, force_english=force_english),
+                          now=now or datetime.now(NPT), with_bs=uses_bs(record, tender.raw_text), tender_id=tender.id)
+    return company_row, ctx
+
+
+def kb_retriever(session: Session, client: LLMClient, company_id: int, settings: Settings) -> RetrieveFn:
+    """Top-k KB chunks for a section query, above PROPOSAL_MIN_SIMILARITY. An embedding failure is a RetrievalError."""
+    def retrieve_fn(query: str) -> list[ChunkHit]:
+        try:
+            hits = retrieve(session, client, query, settings.proposal_top_k, company_id=company_id)
+        except LLMError as exc:
+            raise RetrievalError(str(exc)) from exc
+        return [h for h in hits if h.similarity >= settings.proposal_min_similarity]
+
+    return retrieve_fn
+
+
+def next_version(session: Session, tender_id: int) -> int:
+    return (session.scalar(select(func.max(ProposalRow.version)).where(ProposalRow.tender_id == tender_id)) or 0) + 1
+
+
 def run_proposal(session: Session, client: LLMClient, tender: Tender, *, settings: Settings | None = None,
                  now: datetime | None = None, force_english: bool | None = None) -> Proposal | None:
     """Draft a new proposal version for a checked tender: store it and set `drafted` (`failed` on LLMError)."""
@@ -586,24 +635,12 @@ def run_proposal(session: Session, client: LLMClient, tender: Tender, *, setting
     allowed, why = proposal_allowed(session, tender)
     if not allowed:
         raise ValueError(f"tender {tender.id}: {why}")
-    loaded = load_company(session)
-    if loaded is None:
-        raise ValueError("no company profile; POST /company first")
-    company_row, company = loaded
-    record = TenderRecord.model_validate(tender.record_json)
     force = settings.proposal_force_english if force_english is None else force_english
-    ctx = ProposalContext(record=record, company=company, language=proposal_language(record, force_english=force),
-                          now=now or datetime.now(NPT), with_bs=uses_bs(record, tender.raw_text), tender_id=tender.id)
+    company_row, ctx = proposal_context(session, tender, now=now, force_english=force)
     started = time.perf_counter()
     payload = {"tender": tender.record_json, "company": company_row.profile_json, "stage": "proposal",
                "language": ctx.language.value, "with_bs": ctx.with_bs, "now": ctx.now}
-
-    def retrieve_fn(query: str) -> list[ChunkHit]:
-        try:
-            hits = retrieve(session, client, query, settings.proposal_top_k, company_id=company_row.id)
-        except LLMError as exc:
-            raise RetrievalError(str(exc)) from exc
-        return [h for h in hits if h.similarity >= settings.proposal_min_similarity]
+    retrieve_fn = kb_retriever(session, client, company_row.id, settings)
 
     try:
         sections = draft_proposal(ctx, client=client, retrieve_fn=retrieve_fn, on_progress=report_progress)
@@ -616,7 +653,7 @@ def run_proposal(session: Session, client: LLMClient, tender: Tender, *, setting
         session.commit()
         return None
 
-    version = (session.scalar(select(func.max(ProposalRow.version)).where(ProposalRow.tender_id == tender.id)) or 0) + 1
+    version = next_version(session, tender.id)
     row = ProposalRow(tender_id=tender.id, version=version, sections=[s.model_dump(mode="json") for s in sections],
                       language=ctx.language.value, status=ProposalStatus.DRAFT.value)
     session.add(row)
@@ -629,3 +666,38 @@ def run_proposal(session: Session, client: LLMClient, tender: Tender, *, setting
     tender.updated_at = func.now()
     session.commit()
     return proposal_from_row(row)
+
+
+def revise_proposal(session: Session, client: LLMClient, tender: Tender, row: ProposalRow,
+                    feedback: dict[str, list[str]], *, settings: Settings | None = None, now: datetime | None = None,
+                    ) -> tuple[ProposalRow, list[str]] | None:
+    """Review's one automatic revision pass (spec section 10.3): redraft the sections `feedback` names, copy the rest.
+
+    The new version is added and flushed, not committed (the Review stage commits it with its report), in the
+    reviewed version's language. Returns (new row, revised section keys), or None when no section was named.
+    Raises LLMError; the caller marks the stage failed.
+    """
+    settings = settings or get_settings()
+    old = [ProposalSection.model_validate(s) for s in row.sections]
+    revised = [s.key for s in old if feedback.get(s.key) and s.key in TEMPLATES]
+    if not revised:
+        return None
+    company_row, ctx = proposal_context(session, tender, now=now, language=ProposalLanguage(row.language or "en"))
+    retrieve_fn = kb_retriever(session, client, company_row.id, settings)
+    started = time.perf_counter()
+    sections: list[ProposalSection] = []
+    for section in old:
+        if section.key in revised:
+            planned = PlannedSection(TEMPLATES[section.key], section.requirement_indices)
+            section = generate_section(client, planned, ctx, retrieve_fn, feedback=feedback[section.key],
+                                       previous=section.body_template or section.body)
+        sections.append(section)
+    new_row = ProposalRow(tender_id=tender.id, version=next_version(session, tender.id), language=row.language,
+                          sections=[s.model_dump(mode="json") for s in sections], status=ProposalStatus.DRAFT.value)
+    session.add(new_row)
+    session.flush()
+    _record_code_run(session, tender, {"revision_of": row.id, "feedback": feedback, "stage": "proposal"}, started,
+                     output={"version": new_row.version, "revision_of": row.version, "revised": revised,
+                             "citation_rate": citation_rate(sections),
+                             "flags": {s.key: [f.kind.value for f in s.flags] for s in sections if s.flags}})
+    return new_row, revised

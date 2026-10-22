@@ -15,9 +15,10 @@ itself for code-only work (Matching pre-filters, the Compliance rules layer), or
 when a stage crashed before it could. Rows written during a run are linked to it (`db.runs.pipeline_run_context`).
 
 Resume: a `failed` tender restarts at `resume_status`, derived from what is stored (no record -> Scout;
-no match row -> Matching; a pursued match -> Compliance; stored compliance items that do not block -> Proposal),
-because every failing stage drops its own partial output. Review has no runner yet (agent not built); its step
-is wired and tested with injected runners. Proposal reports section-by-section progress on its stage.
+no match row -> Matching; a pursued match -> Compliance; stored compliance items that do not block -> Proposal;
+a stored proposal version -> Review), because every failing stage drops its own partial output. Proposal reports
+section-by-section progress on its stage. Review may revise the proposal once (agents.review.run_review); approval
+(reviewed -> approved) is a person's, through POST /proposals/{id}/approve.
 """
 
 import hashlib
@@ -34,7 +35,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from agents.compliance import latest_override, load_report, override_covers, run_compliance
 from agents.matching import load_company, run_matching
-from agents.proposal import run_proposal
+from agents.proposal import latest_proposal, run_proposal
+from agents.review import run_review
 from agents.scout import run_scout
 from config import Settings, get_settings
 from db.models import AgentRunRow, ComplianceItemRow, Match, PipelineRun, Tender
@@ -105,7 +107,7 @@ def default_runners(settings: Settings | None = None, now: datetime | None = Non
         Stage.COMPLIANCE: lambda session, client, tender: run_compliance(session, client, tender, settings=settings, now=now),
         Stage.PROPOSAL: lambda session, client, tender: run_proposal(session, client, tender, settings=settings, now=now,
                                                                     force_english=force_english),
-        Stage.REVIEW: None,  # TODO: agents.review
+        Stage.REVIEW: lambda session, client, tender: run_review(session, client, tender, settings=settings, now=now),
     }
 
 
@@ -129,7 +131,10 @@ def resume_status(session: Session, tender: Tender) -> TenderStatus:
     if report is None:
         return S.MATCHED
     blocked = report.is_blocked and not override_covers(latest_override(session, tender.id), report)
-    return S.BLOCKED if blocked else S.CHECKED
+    if blocked:
+        return S.BLOCKED
+    # A failing Proposal stores no version, so a stored version means a draft exists (e.g. Review failed after).
+    return S.DRAFTED if latest_proposal(session, tender.id) is not None else S.CHECKED
 
 
 def _reach(session: Session, tender: Tender) -> TenderStatus:
@@ -150,6 +155,8 @@ def plan_run(session: Session, tender: Tender, *, target: TenderStatus = S.CHECK
     if target not in TARGETS:
         raise ValueError(f"target must be one of {[t.value for t in TARGETS]} (approval is a human step)")
     current = TenderStatus(tender.status)
+    if current is S.APPROVED:
+        raise ValueError(f"tender {tender.id} is approved; an approved bid is not re-run")
     reach = _reach(session, tender)
     last = MAIN_LINE.index(target) - 1  # index in STEPS of the step that ends at `target`
 
@@ -159,7 +166,8 @@ def plan_run(session: Session, tender: Tender, *, target: TenderStatus = S.CHECK
             raise ValueError(f"from_stage {from_stage.value} is after target {target.value}")
         if MAIN_LINE.index(STEPS[first].from_status) > MAIN_LINE.index(reach):
             raise ValueError(f"tender {tender.id} is {current.value}; it has not reached {from_stage.value} yet")
-    elif current in ORCHESTRATOR_DONE:
+    elif current in ORCHESTRATOR_DONE and MAIN_LINE.index(reach) >= MAIN_LINE.index(target):
+        # Moving forward (drafted -> reviewed) is fine; re-running stages under existing proposal work is not.
         raise ValueError(f"tender {tender.id} is {current.value}; pass from_stage to re-run a stage")
     elif current in (S.SKIPPED, S.BLOCKED) or MAIN_LINE.index(reach) >= MAIN_LINE.index(target):
         if MAIN_LINE.index(target) <= MAIN_LINE.index(S.EXTRACTED):

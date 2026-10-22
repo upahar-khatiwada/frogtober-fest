@@ -319,8 +319,11 @@ def test_from_stage_rewinds_and_validates(session_factory, db_session, make_clie
         plan_run(db_session, tender, target=S.MATCHED, from_stage=Stage.COMPLIANCE, runners=runners)
     with pytest.raises(ValueError, match="human"):
         plan_run(db_session, tender, target=S.APPROVED, runners=runners)
-    with pytest.raises(ValueError, match="not implemented"):
-        plan_run(db_session, tender, target=S.REVIEWED, runners=orch.default_runners())  # no Review agent yet
+    with pytest.raises(ValueError, match="not implemented"):  # a stage without a runner is refused, not skipped
+        plan_run(db_session, tender, target=S.REVIEWED, runners={**orch.default_runners(), Stage.REVIEW: None})
+    approved = add_tender(db_session, record(), status="approved", url="seed://a")
+    with pytest.raises(ValueError, match="approved"):  # an approved bid is never re-run, even with from_stage
+        plan_run(db_session, approved, from_stage=Stage.PROPOSAL, target=S.REVIEWED, runners=runners)
     with pytest.raises(ValueError, match="already extracted"):
         plan_run(db_session, add_tender(db_session, record(), url="seed://e"), target=S.EXTRACTED, runners=runners)
 

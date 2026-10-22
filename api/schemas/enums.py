@@ -229,5 +229,31 @@ class IngestStatus(StrEnum):
 
 
 class ReviewVerdict(StrEnum):
+    """Computed by code (agents.review.decide_verdict). JSONB only, so no CHECK constraint."""
+
     PASS = "pass"
-    FAIL = "fail"
+    NEEDS_WORK = "needs_work"  # approvable, but the person should fix the listed gaps first
+    FAIL = "fail"  # cannot be approved (deadline passed, a mandatory requirement unanswered, or a score too low)
+
+
+class ReviewCheckId(StrEnum):
+    """Deterministic Review checks (hard rule 5). JSONB only."""
+
+    MANDATORY_ADDRESSED = "mandatory_addressed"  # every mandatory requirement is answered by a drafted section
+    NO_PLACEHOLDERS = "no_placeholders"  # no [MISSING]/[UNKNOWN]/[UNVERIFIED]/⟦unsourced⟧/{{...}} left in the text
+    BID_SECURITY_STATED = "bid_security_stated"  # the notice asks for bid security and the text says it is enclosed
+    DEADLINE_NOT_PASSED = "deadline_not_passed"
+    SECTIONS_CITED = "sections_cited"  # every section cites at least one KB chunk (hard rule 8)
+
+
+class GapSource(StrEnum):
+    CHECK = "check"  # a deterministic Review check
+    MODEL = "model"  # the Review model's judgement
+
+
+class ChecklistStatus(StrEnum):
+    """An attachment-checklist row in the bid package (export/content.py). Not a DB column."""
+
+    PRESENT = "present"  # a readable, unexpired document is on file and stays valid through the bid validity
+    EXPIRING = "expiring"  # on file and valid at the deadline, but lapses before the bid validity period ends
+    MISSING = "missing"  # nothing usable on file (none, expired, wrong fiscal year, or a per-bid form to sign)

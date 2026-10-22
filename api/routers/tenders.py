@@ -2,8 +2,8 @@
 
 Implemented: POST /tenders/scrape, GET /tenders (ranked, filtered), GET /tenders/{id} (with the
 compliance section), POST /tenders/{id}/analyze (202: a background pipeline run, polled via GET /runs/{id}) and
-POST /tenders/{id}/compliance/override, POST /tenders/{id}/proposal (202: a background Proposal run behind the
-compliance gate, 409 while blocked) and GET /tenders/{id}/proposals (stored versions).
+POST /tenders/{id}/compliance/override, POST /tenders/{id}/proposal (202: a background Proposal + Review run behind
+the compliance gate, 409 while blocked) and GET /tenders/{id}/proposals (stored versions).
 """
 
 from datetime import datetime, time, timedelta
@@ -282,11 +282,12 @@ def generate_proposal(
     now: Annotated[datetime, Depends(get_now)],
     body: Annotated[ProposalRequest | None, Body()] = None,
 ) -> PipelineRunView:
-    """Draft a new proposal version in the background (Review is not built yet, so the run ends at `drafted`).
+    """Draft a new proposal version, then review it, in the background (spec section 10.2: Proposal and Review).
 
     Refused (409) while hard compliance failures are not overridden. Poll GET /runs/{id}: the Proposal stage
-    carries section-by-section `progress`. Every run stores a new version (GET /tenders/{id}/proposals); a drafted
-    or reviewed tender is drafted again from its compliance result.
+    carries section-by-section `progress`; the run ends `reviewed` (Review may add one revised version). Every run
+    stores a new version (GET /tenders/{id}/proposals); a drafted or reviewed tender is drafted again from its
+    compliance result. Approval is a separate human step (POST /proposals/{id}/approve).
     """
     body = body or ProposalRequest()
     tender = session.get(Tender, tender_id)
@@ -296,9 +297,10 @@ def generate_proposal(
     if not allowed:
         raise HTTPException(status.HTTP_409_CONFLICT, why.replace("{id}", str(tender_id)))
     runners = orchestrator.default_runners(settings, now, force_english=body.force_english)
-    redo = tender.status in (TenderStatus.DRAFTED.value, TenderStatus.REVIEWED.value)
+    redo = tender.status in (TenderStatus.DRAFTED.value, TenderStatus.REVIEWED.value) or (
+        tender.status == TenderStatus.FAILED.value and orchestrator.resume_status(session, tender) is TenderStatus.DRAFTED)
     try:
-        run = orchestrator.start_run(session, tender, target=TenderStatus.DRAFTED,
+        run = orchestrator.start_run(session, tender, target=TenderStatus.REVIEWED,
                                      from_stage=Stage.PROPOSAL if redo else None, runners=runners)
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc

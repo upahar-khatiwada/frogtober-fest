@@ -13,6 +13,7 @@ from schemas import (
     MatchResult,
     ProposalSection,
     ProposalSectionDraft,
+    ReviewAssessment,
     ReviewReport,
     TenderRecord,
 )
@@ -109,17 +110,31 @@ def test_proposal_section_and_review_parse():
         '{"key": "relevant_experience", "title": "Relevant experience", "body": "We built ...", "grounded": false}',
         strict=True)
     assert section.cited_chunk_ids == [] and section.flags == []  # ungrounded sections are storable (and flagged)
-    review = ReviewReport.model_validate_json(
-        json.dumps(
-            {
-                "scores": {"completeness": 80, "relevance": 75, "compliance": 90},
-                "gaps": [{"section_title": None, "issue": "No work schedule", "severity": "soft"}],
-                "verdict": "pass",
-            }
-        ),
+    # The LLM fills ReviewAssessment (scores + gaps, no verdict); code builds the ReviewReport.
+    assessment = ReviewAssessment.model_validate_json(
+        json.dumps({"scores": {"completeness": 80, "relevance": 75, "compliance": 90},
+                    "gaps": [{"section_key": "work_plan", "issue": "No work schedule", "severity": "soft"}]}),
         strict=True,
     )
-    assert review.verdict == "pass"
+    assert assessment.scores.lowest == 75 and assessment.gaps[0].requirement_index is None
+    for bad in ({"verdict": "pass"},  # the verdict is code's
+                {"gaps": [{"issue": "Untied gap", "severity": "soft"}]},  # a gap names a requirement or a section
+                {"scores": {"completeness": "80", "relevance": 75, "compliance": 90}}):
+        with pytest.raises(ValidationError):
+            ReviewAssessment.model_validate_json(
+                json.dumps({"scores": {"completeness": 80, "relevance": 75, "compliance": 90}} | bad), strict=True)
+    review = ReviewReport.model_validate_json(
+        json.dumps({"scores": {"completeness": 80, "relevance": 75, "compliance": 90},
+                    "gaps": [{"source": "check", "check": "deadline_not_passed", "issue": "Deadline passed",
+                              "severity": "hard"}],
+                    "verdict": "needs_work"}),
+        strict=True,
+    )
+    assert review.verdict == "needs_work"
+    with pytest.raises(ValidationError):  # a model gap cannot pose as a deterministic check
+        ReviewReport.model_validate_json(json.dumps(
+            {"scores": {"completeness": 80, "relevance": 75, "compliance": 90}, "verdict": "pass",
+             "gaps": [{"source": "model", "check": "no_placeholders", "issue": "x", "severity": "soft"}]}), strict=True)
 
 
 # --- Nepal enum and contract fields reject bad values ---

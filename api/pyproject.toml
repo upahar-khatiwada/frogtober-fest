@@ -19,6 +19,8 @@ dependencies = [
     "pgvector>=0.5.1",
     "python-multipart>=0.0.32",
     "beautifulsoup4>=4.15.0",
+    "reportlab>=5.1,<6",
+    "uharfbuzz>=0.56",
 ]
 
 [dependency-groups]

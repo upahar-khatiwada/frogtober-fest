@@ -236,9 +236,14 @@ class ProposalRow(Base):
     version: Mapped[int] = mapped_column(Integer, server_default="1")
     sections: Mapped[list[Any]] = mapped_column(JSONB)  # ProposalSection dumps, incl. cited_chunk_ids
     language: Mapped[str | None] = mapped_column(Text)
-    review_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    review_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)  # ReviewReport
     status: Mapped[str] = mapped_column(Text, server_default=ProposalStatus.DRAFT.value)
     approved_at: Mapped[datetime | None] = mapped_column(TS)
+    # Additive (0005): the human gate. Approval needs a review, a verdict other than fail, and an open after the review.
+    approved_by: Mapped[str | None] = mapped_column(Text)
+    approval_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(TS)
+    opened_at: Mapped[datetime | None] = mapped_column(TS)
     created_at: Mapped[datetime] = mapped_column(TS, server_default=func.now())
 
 

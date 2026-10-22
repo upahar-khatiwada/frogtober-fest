@@ -57,10 +57,10 @@ def test_proposal_refused_while_blocked_then_override(api, db_session, pg_url, m
     assert override["overridden_by"] == "Sita Demo Thapa" and override["active"] is True and override["overridden_at"]
     assert override["hard_failures"] == ["NP-TAX-CLEARANCE:Tax clearance for F/Y 2082/83"]
     assert body["compliance"]["blocked"] is True and body["compliance"]["proposal_allowed"] is True
-    # Gate passes: a background Proposal run drafts it (drafting itself is tested in tests/test_proposal.py).
+    # Gate passes: a background Proposal + Review run drafts and reviews it (tests/test_proposal.py, test_review.py).
     api.holder["llm"] = LLMClient(lambda _run: None, settings_(), transport=httpx.MockTransport(DraftFake().handler))
     resp = api.post(f"/tenders/{tender.id}/proposal")
-    assert resp.status_code == 202 and api.get(f"/runs/{resp.json()['id']}").json()["end_status"] == "drafted"
+    assert resp.status_code == 202 and api.get(f"/runs/{resp.json()['id']}").json()["end_status"] == "reviewed"
     # A second override is refused: the tender is no longer blocked.
     assert api.post(f"/tenders/{tender.id}/compliance/override",
                     json={"overridden_by": "x", "reason": "y"}).status_code == 409

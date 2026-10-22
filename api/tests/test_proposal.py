@@ -272,7 +272,8 @@ def test_citation_rate():
 # --- DB: versions, status, agent_runs, failure + resume, progress ------------------------------------------------
 
 class DraftFake:
-    """Fake Ollama: drafts cite the first chunk shown and quote its first words; other stages get fixed replies."""
+    """Fake Ollama: drafts cite the first chunk shown and quote its first words; other stages get fixed replies
+    (Review: good scores, no gaps; the drafts never mention the bid security, so the verdict is needs_work)."""
 
     def __init__(self, *, invalid: bool = False, cite: bool = True) -> None:
         self.invalid, self.cite = invalid, cite
@@ -287,6 +288,8 @@ class DraftFake:
             content = assessment_json(85)
         elif title == "ComplianceAssessment":
             content = unclear_json()
+        elif title == "ReviewAssessment":
+            content = json.dumps({"scores": {"completeness": 85, "relevance": 80, "compliance": 90}, "gaps": []})
         else:
             self.drafts += 1
             content = '{"body": 1}' if self.invalid else self._draft(body["messages"][1]["content"])
@@ -428,6 +431,10 @@ def test_pipeline_reports_section_progress(pg_url, make_client, db_session, sess
 # --- API -------------------------------------------------------------------------------------------------------
 
 def test_proposal_api_202_progress_versions(api, db_session, pg_url, make_client, session_factory):  # noqa: F811
+    from deps import get_settings
+    from main import app
+
+    app.dependency_overrides[get_settings] = lambda: settings_(review_auto_revise=False)  # one version per run here
     seed_demo(pg_url, make_client)
     tender = demo_tender(db_session, status="extracted")
     api.holder["llm"] = LLMClient(lambda _run: None, settings_(), transport=httpx.MockTransport(DraftFake().handler))
@@ -439,12 +446,13 @@ def test_proposal_api_202_progress_versions(api, db_session, pg_url, make_client
     resp = api.post(f"/tenders/{tender.id}/proposal")
     assert resp.status_code == 202, resp.text
     run = api.get(f"/runs/{resp.json()['id']}").json()
-    assert run["status"] == "succeeded" and run["target"] == "drafted" and run["end_status"] == "drafted"
-    [stage] = run["stages"]
+    assert run["status"] == "succeeded" and run["target"] == "reviewed" and run["end_status"] == "reviewed"
+    stage, review = run["stages"]  # spec section 10.2: the proposal route runs Proposal and Review
     assert stage["stage"] == "proposal" and stage["progress"]["done"] == stage["progress"]["total"]
-    assert {r["stage"] for r in run["agent_runs"]} == {"proposal"}
+    assert review["stage"] == "review" and review["status"] == "ok"
+    assert {r["stage"] for r in run["agent_runs"]} == {"proposal", "review"}
 
-    resp = api.post(f"/tenders/{tender.id}/proposal", json={"force_english": True})  # a drafted tender re-drafts
+    resp = api.post(f"/tenders/{tender.id}/proposal", json={"force_english": True})  # a reviewed tender re-drafts
     assert resp.status_code == 202, resp.text
     versions = api.get(f"/tenders/{tender.id}/proposals").json()
     assert [(v["version"], v["language"]) for v in versions] == [(2, "en"), (1, "ne")]

@@ -173,12 +173,13 @@ def test_analyze_conflicts(api, db_session):
     seed_company(db_session)
     new = Tender(source_url="new", raw_text="x", status="new")
     drafted = Tender(source_url="drafted", raw_text="x", status="drafted")
-    db_session.add_all([new, drafted])
+    approved = Tender(source_url="approved", raw_text="x", status="approved")
+    db_session.add_all([new, drafted, approved])
     db_session.commit()
     api.holder["llm"] = make_llm(FakeOllama([]))
     assert api.post(f"/tenders/{drafted.id}/analyze").status_code == 409  # proposal work exists; needs from_stage
     assert api.post(f"/tenders/{new.id}/analyze", json={"target": "approved"}).status_code == 409  # human-only
-    assert api.post(f"/tenders/{new.id}/analyze", json={"target": "reviewed"}).status_code == 409  # no Review agent yet
+    assert api.post(f"/tenders/{approved.id}/analyze", json={"from_stage": "scout"}).status_code == 409  # final
     assert api.post(f"/tenders/{new.id}/analyze", json={"from_stage": "matching"}).status_code == 409  # not extracted
     assert api.post(f"/tenders/{new.id}/analyze", json={"bogus": 1}).status_code == 422
     assert api.post("/tenders/99999/analyze").status_code == 404
