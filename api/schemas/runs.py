@@ -37,6 +37,12 @@ class AgentRun(AgentRunRecord):
     created_at: datetime
 
 
+class AgentRunView(AgentRun):
+    """GET /agent-runs: one audit row with its tender's title (the Runs page)."""
+
+    tender_title: str | None = None
+
+
 class ProgressItem(Contract):
     key: str
     title: str

@@ -48,3 +48,31 @@ def test_check_fails_on_a_cache_miss(pg_url, tmp_path, capsys):
     assert main([*argv, "--check"]) == 1
     out = capsys.readouterr().out
     assert "001  failed" in out and "Cache misses" in out
+
+
+def test_through_review_overrides_the_block_and_records_proposal_and_review_at_a_pinned_clock(
+        pg_url, session_factory, tmp_path, capsys):
+    from scripts.precache_demo import main
+    from tests.test_proposal import DraftFake
+
+    class Fake(DraftFake):
+        def handler(self, request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            if request.url.path == "/api/chat" and body["format"]["title"] == "TenderExtraction":
+                return httpx.Response(200, json={"message": {"role": "assistant", "content": GOOD["TenderExtraction"]}})
+            return super().handler(request)
+
+    cache = tmp_path / "llm_cache.json"
+    argv = ["--only", "001", "--cache", str(cache), "--database-url", pg_url, "--through-review", "001",
+            "--now", "2026-10-22T10:00:00+05:45"]
+    assert main([*argv, "--seed-company"], transport=httpx.MockTransport(Fake().handler)) == 0
+    out = capsys.readouterr().out
+    assert "001  blocked" in out and "001  reviewed" in out and "proposal:ok" in out and "review:ok" in out
+    data = json.loads(cache.read_text(encoding="utf-8"))
+    assert {e["stage"] for e in data["chat"].values()} == {"scout", "matching", "compliance", "proposal", "review"}
+    with session_factory() as session:
+        [tender] = session.scalars(select(Tender)).all()
+        assert tender.status == "reviewed"
+
+    # The same requests replay offline (a fresh scout run re-drafts and re-reviews the same text).
+    assert main([*argv, "--check"]) == 0

@@ -4,24 +4,12 @@ import { Suspense } from "react";
 import { LoadTendersButton } from "@/components/tenders/load-tenders-button";
 import { TenderFilters } from "@/components/tenders/tender-filters";
 import { TenderRow } from "@/components/tenders/tender-row";
-import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { ApiError, listTenders, parseTenderFilters, type TenderListItem } from "@/lib/api/tenderly";
 import { PUBLIC_API_URL } from "@/lib/config";
 import { T } from "@/lib/prefs";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-function ListSkeleton() {
-  return (
-    <ul className="flex flex-col gap-3" aria-hidden="true">
-      {[0, 1, 2].map((i) => (
-        <li key={i}>
-          <Skeleton className="h-36 w-full rounded-xl" />
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 /** Server component: GET /tenders with the URL's filters, rendered as ranked rows. */
 async function TenderList({ searchParams }: { searchParams: SearchParams }) {
@@ -34,17 +22,17 @@ async function TenderList({ searchParams }: { searchParams: SearchParams }) {
     // An HTTP error from a reachable API shows its message; anything else means unreachable.
     const httpError = e instanceof ApiError && e.status > 0;
     return (
-      <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+      <ErrorState>
         {httpError ? <T k="dashboard.loadFailed" vars={{ error: e.message }} /> : <T k="dashboard.error" vars={{ url: PUBLIC_API_URL }} />}
-      </div>
+      </ErrorState>
     );
   }
   if (tenders.length === 0) {
     const filtered = Object.keys(filters).length > 0;
     return (
-      <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+      <EmptyState>
         <T k={filtered ? "dashboard.empty" : "dashboard.emptyNone"} />
-      </p>
+      </EmptyState>
     );
   }
   return (
@@ -75,10 +63,10 @@ export default function DashboardPage({ searchParams }: { searchParams: SearchPa
         </div>
         <LoadTendersButton />
       </div>
-      <Suspense fallback={<Skeleton className="h-40 w-full rounded-xl" />}>
+      <Suspense fallback={<LoadingState blocks={["h-40 w-full"]} />}>
         <TenderFilters />
       </Suspense>
-      <Suspense fallback={<ListSkeleton />}>
+      <Suspense fallback={<LoadingState blocks={["h-36 w-full", "h-36 w-full", "h-36 w-full"]} />}>
         <TenderList searchParams={searchParams} />
       </Suspense>
     </div>

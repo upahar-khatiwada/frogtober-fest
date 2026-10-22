@@ -274,10 +274,11 @@ def _store(session: Session, tender: Tender, row: ProposalRow, report: ReviewRep
 
 
 def run_review(session: Session, client: LLMClient, tender: Tender, *, settings: Settings | None = None,
-               now: datetime | None = None) -> ReviewReport | None:
+               now: datetime | None = None, auto_revise: bool | None = None) -> ReviewReport | None:
     """Review the latest version of a drafted tender; maybe revise once; set `reviewed` (`failed` on LLMError).
 
-    Returns the report of the version the person should look at (the revision, if one was made).
+    Returns the report of the version the person should look at (the revision, if one was made). `auto_revise`
+    overrides REVIEW_AUTO_REVISE (a re-review of a person's edit passes False, so the model never rewrites it).
     """
     settings = settings or get_settings()
     if TenderStatus(tender.status) not in REVIEWABLE or tender.record_json is None:
@@ -292,7 +293,8 @@ def run_review(session: Session, client: LLMClient, tender: Tender, *, settings:
         sections = [ProposalSection.model_validate(s) for s in row.sections]
         report = review_proposal(client, record, sections, now=now, settings=settings, tender_id=tender.id)
         _store(session, tender, row, report, now, started)
-        if settings.review_auto_revise and report.verdict is not ReviewVerdict.PASS:
+        revise = settings.review_auto_revise if auto_revise is None else auto_revise
+        if revise and report.verdict is not ReviewVerdict.PASS:
             revised = revise_proposal(session, client, tender, row, revision_feedback(report, sections),
                                       settings=settings, now=now)
             if revised is not None:
@@ -346,6 +348,9 @@ def approval_blockers(session: Session, row: ProposalRow) -> list[str]:
     if row.opened_at is None or (row.reviewed_at is not None and row.opened_at < row.reviewed_at):
         blockers.append(f"version {row.version} has not been opened since its review; open it "
                         f"(POST /proposals/{row.id}/open) and read it before approving")
+    latest = latest_proposal(session, row.tender_id)
+    if latest is not None and latest.id != row.id:
+        blockers.append(f"version {latest.version} is newer; approve the latest version")
     if tender.status != TenderStatus.REVIEWED.value:
         blockers.append(f"tender {tender.id} is {tender.status}; only a reviewed tender can be approved")
     if active_run(session, tender.id) is not None:

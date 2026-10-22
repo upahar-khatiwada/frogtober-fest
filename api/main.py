@@ -50,6 +50,7 @@ app.include_router(tenders.router)
 app.include_router(company.router)
 app.include_router(proposals.router)
 app.include_router(runs.router)
+app.include_router(runs.agent_runs_router)
 app.include_router(reference.router)
 
 

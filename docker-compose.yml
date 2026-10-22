@@ -30,6 +30,8 @@ services:
       SCRAPER_CONTACT: ${SCRAPER_CONTACT:-}
       # Pre-cached demo analyses (api/scripts/precache_demo.py); ignored while the file does not exist.
       LLM_REPLAY_CACHE: ${LLM_REPLAY_CACHE:-/data/demo_cache/llm_cache.json}
+      # Pinned demo clock (empty = real time). Must match `precache_demo --now` for Review to replay from the cache.
+      DEMO_NOW: ${DEMO_NOW:-}
     volumes:
       # Synthetic seed tenders for POST /tenders/scrape (data/ is outside the api build context).
       - ./data/seed_tenders:/data/seed_tenders:ro

@@ -288,6 +288,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/proposals/{proposal_id}/export/{fmt}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Document
+         * @description The approved version's bid package as one PDF or DOCX (the same file the ZIP holds).
+         */
+        get: operations["download_document_proposals__proposal_id__export__fmt__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Checklist
+         * @description The attachment checklist for this version: every document the notice lists (+ statutory ones), present /
+         *     expiring / missing against the knowledge base, with dates in BS and AD. Readable before approval.
+         */
+        get: operations["get_checklist_proposals__proposal_id__checklist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/sections/{section_key}/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Proposal Section
+         * @description A person's edit of one section, saved as a NEW version (the edited version is kept unchanged).
+         *
+         *     The new version is a draft: it has no review, so it cannot be approved until POST /proposals/{id}/review has run
+         *     on it. Citations stay as drafted; flags whose markers were edited out are dropped. Writes an audit row.
+         */
+        post: operations["edit_proposal_section_proposals__proposal_id__sections__section_key__edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review Version
+         * @description Run Review on the latest version (e.g. after a person's edit), in the background. Poll GET /runs/{id}.
+         *
+         *     Unlike POST /tenders/{id}/proposal there is no automatic revision: the model never rewrites a person's text.
+         */
+        post: operations["review_version_proposals__proposal_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs": {
         parameters: {
             query?: never;
@@ -320,6 +406,26 @@ export interface paths {
          * @description Run status for polling (the UI polls every 2 s, spec section 9.2): stages with durations, plus its agent_runs.
          */
         get: operations["get_run_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Runs
+         * @description agent_runs rows, newest first, with the tender title (the Runs page audit log).
+         */
+        get: operations["list_agent_runs_agent_runs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -441,6 +547,59 @@ export interface components {
             created_at: string;
         };
         /**
+         * AgentRunView
+         * @description GET /agent-runs: one audit row with its tender's title (the Runs page).
+         */
+        AgentRunView: {
+            /** Tender Id */
+            tender_id?: number | null;
+            stage: components["schemas"]["Stage"];
+            /** Model */
+            model: string;
+            /**
+             * Input Hash
+             * @description sha256 of the canonical request (model, messages, schema, temperature).
+             */
+            input_hash: string;
+            /**
+             * Output Json
+             * @description Validated output; null when ok is false.
+             */
+            output_json?: {
+                [key: string]: unknown;
+            } | null;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Ok */
+            ok: boolean;
+            /** Attempts */
+            attempts: number;
+            /** Error */
+            error?: string | null;
+            /**
+             * Raw Output
+             * @description Last raw model output, kept on failure for debugging.
+             */
+            raw_output?: string | null;
+            /**
+             * Cached
+             * @description Replayed from the LLM replay cache (LLM_REPLAY_CACHE), not a live model call.
+             * @default false
+             */
+            cached: boolean;
+            /** Id */
+            id: number;
+            /** Pipeline Run Id */
+            pipeline_run_id?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Tender Title */
+            tender_title?: string | null;
+        };
+        /**
          * AnalyzeRequest
          * @description POST /tenders/{id}/analyze body (optional).
          */
@@ -535,6 +694,58 @@ export interface components {
          * @enum {string}
          */
         BuyerLevel: "federal" | "province" | "local" | "other";
+        /**
+         * ChecklistItem
+         * @description One row of the bid package's attachment checklist (export/content.py), from the notice + compliance + KB.
+         */
+        ChecklistItem: {
+            /**
+             * Document
+             * @description Document as the notice names it.
+             */
+            document: string;
+            doc_type: components["schemas"]["DocType"];
+            /** Mandatory */
+            mandatory: boolean;
+            /** Fiscal Year Bs */
+            fiscal_year_bs?: string | null;
+            status: components["schemas"]["ChecklistStatus"];
+            /**
+             * Files
+             * @description KB documents attached for this row (filenames).
+             */
+            files?: string[];
+            /** Document Ids */
+            document_ids?: number[];
+            /**
+             * Expires On
+             * @description Earliest expiry (AD) of the attached documents, or of the expired copy on file when missing.
+             */
+            expires_on?: string | null;
+            /**
+             * Expires On Bs
+             * @description The same date in BS (YYYY-MM-DD).
+             */
+            expires_on_bs?: string | null;
+            /**
+             * Rule Id
+             * @description Compliance rule that checked this document type.
+             */
+            rule_id?: string | null;
+            /** @description That rule's status in the compliance report. */
+            compliance_status?: components["schemas"]["ComplianceStatus"] | null;
+            /**
+             * Note
+             * @description What is on file, or what to do (plain language, dates in BS and AD).
+             */
+            note: string;
+        };
+        /**
+         * ChecklistStatus
+         * @description An attachment-checklist row in the bid package (export/content.py). Not a DB column.
+         * @enum {string}
+         */
+        ChecklistStatus: "present" | "expiring" | "missing";
         /**
          * CompanyDocumentView
          * @description An uploaded KB document and its ingestion state (GET /company/documents).
@@ -1210,6 +1421,13 @@ export interface components {
             requirement_indices?: number[];
             /** Placeholders */
             placeholders?: components["schemas"]["ResolvedPlaceholder"][];
+            /**
+             * Edited By
+             * @description Person who last edited this section by hand (null: as drafted).
+             */
+            edited_by?: string | null;
+            /** Edited At */
+            edited_at?: string | null;
         };
         /**
          * ProposalStatus
@@ -1497,6 +1715,21 @@ export interface components {
              * @default 3
              */
             max_notices: number;
+        };
+        /**
+         * SectionEditRequest
+         * @description POST /proposals/{id}/sections/{key}/edit: a person's text for one section. Saved as a new version.
+         */
+        SectionEditRequest: {
+            /**
+             * Body
+             * @description The section text (Markdown), as the person wrote it.
+             */
+            body: string;
+            /** Edited By */
+            edited_by: string;
+            /** Note */
+            note?: string | null;
         };
         /** SectionFlag */
         SectionFlag: {
@@ -2406,6 +2639,193 @@ export interface operations {
             };
         };
     };
+    download_document_proposals__proposal_id__export__fmt__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: number;
+                fmt: "pdf" | "docx";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bid package document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": unknown;
+                };
+            };
+            /** @description No such proposal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The version is not approved */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_checklist_proposals__proposal_id__checklist_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChecklistItem"][];
+                };
+            };
+            /** @description No such proposal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The tender record or company is missing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_proposal_section_proposals__proposal_id__sections__section_key__edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: number;
+                section_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SectionEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Proposal"];
+                };
+            };
+            /** @description No such proposal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not the latest version, tender approved or not drafted/reviewed, a run is active, or the text is unchanged */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_version_proposals__proposal_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunView"];
+                };
+            };
+            /** @description No such proposal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not the latest version, already reviewed or approved, or a run is active */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_runs_runs_get: {
         parameters: {
             query?: {
@@ -2466,6 +2886,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agent_runs_agent_runs_get: {
+        parameters: {
+            query?: {
+                tender_id?: number | null;
+                stage?: components["schemas"]["Stage"] | null;
+                ok?: boolean | null;
+                pipeline_run_id?: number | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunView"][];
+                };
             };
             /** @description Validation Error */
             422: {

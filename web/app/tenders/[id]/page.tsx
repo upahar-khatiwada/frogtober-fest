@@ -2,8 +2,8 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { TenderWorkspace } from "@/components/tender-detail/tender-workspace";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   listRules,
   loadTenderBundle,
@@ -30,16 +30,7 @@ function Message({
       >
         ← <T k="td.back" />
       </Link>
-      <p
-        role={tone === "error" ? "alert" : undefined}
-        className={
-          tone === "error"
-            ? "rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive"
-            : "rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground"
-        }
-      >
-        {children}
-      </p>
+      {tone === "error" ? <ErrorState>{children}</ErrorState> : <EmptyState>{children}</EmptyState>}
     </div>
   );
 }
@@ -86,13 +77,7 @@ async function TenderData({ params }: { params: Params }) {
 export default function TenderPage({ params }: { params: Params }) {
   return (
     <Suspense
-      fallback={
-        <div className="flex flex-col gap-4" aria-hidden="true">
-          <Skeleton className="h-10 w-2/3" />
-          <Skeleton className="h-32 w-full rounded-xl" />
-          <Skeleton className="h-64 w-full rounded-xl" />
-        </div>
-      }
+      fallback={<LoadingState />}
     >
       <TenderData params={params} />
     </Suspense>

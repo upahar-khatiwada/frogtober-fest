@@ -2,9 +2,11 @@
  * The app's API calls, typed from the generated OpenAPI schema. With NEXT_PUBLIC_USE_MOCKS=1
  * each call is served by lib/mock/ instead, so the UI works without the backend.
  */
-import { USE_MOCKS, apiBaseUrl } from "@/lib/config";
+import { PUBLIC_API_URL, USE_MOCKS, apiBaseUrl } from "@/lib/config";
 import * as mock from "@/lib/mock/api";
 import * as mockDetail from "@/lib/mock/detail-api";
+import * as mockProposal from "@/lib/mock/proposal-api";
+import * as mockRuns from "@/lib/mock/runs-api";
 
 import { getApiClient } from "./client";
 import {
@@ -34,11 +36,16 @@ export type ComplianceView = S["ComplianceView"];
 export type PipelineRunView = S["PipelineRunView"];
 export type PipelineRunDetail = S["PipelineRunDetail"];
 export type Proposal = S["Proposal"];
+export type ProposalSection = S["ProposalSection"];
+export type ReviewReport = S["ReviewReport"];
+export type ChecklistItem = S["ChecklistItem"];
+export type AgentRunView = S["AgentRunView"];
+export type Requirement = S["Requirement"];
 export type TenderFilters = NonNullable<
   operations["list_tenders_tenders_get"]["parameters"]["query"]
 >;
 
-/** GET /rules (api/routers/reference.py). Hand-typed until `bun run gen:api` is re-run. */
+/** GET /rules (api/routers/reference.py): the fields the UI reads (a subset of the generated `Rule`). */
 export type RuleView = {
   id: string;
   description: string;
@@ -50,17 +57,7 @@ export type RuleView = {
 };
 
 /** GET /chunks: one knowledge-base chunk with its document. */
-export type KBChunkView = {
-  chunk_id: number;
-  document_id: number;
-  filename: string;
-  doc_type: DocType;
-  chunk_index: number;
-  content: string;
-  expires_on?: string | null;
-  is_expired?: boolean | null;
-  fiscal_year_bs?: string | null;
-};
+export type KBChunkView = S["KBChunkView"];
 
 export class ApiError extends Error {
   constructor(
@@ -269,11 +266,7 @@ export async function generateProposal(
   id: number,
   forceEnglish?: boolean,
 ): Promise<PipelineRunView> {
-  if (USE_MOCKS)
-    throw new ApiError(
-      "Not implemented yet - see PROGRESS.md Next prompt.",
-      501,
-    );
+  if (USE_MOCKS) return mockDetail.generateProposal(id);
   const { data, error, response } = await getApiClient().POST(
     "/tenders/{tender_id}/proposal",
     {
@@ -335,6 +328,192 @@ export async function loadTenderBundle(
     chunks: Object.fromEntries(chunkList.map((c) => [c.chunk_id, c])),
     documents: Object.fromEntries(docList.map((d) => [d.id, d])),
   };
+}
+
+// --- proposal page -------------------------------------------------------------------------------------
+
+/** GET /tenders/{id}/proposals: every stored version, newest first. */
+export async function listProposals(tenderId: number): Promise<Proposal[]> {
+  if (USE_MOCKS) return mockProposal.listProposals(tenderId);
+  const { data, error, response } = await getApiClient().GET(
+    "/tenders/{tender_id}/proposals",
+    { params: { path: { tender_id: tenderId } }, cache: "no-store" },
+  );
+  if (!data) fail(error, response);
+  return data;
+}
+
+/** POST /proposals/{id}/open: a person is looking at this version (approval needs an open after its review). */
+export async function openProposal(id: number): Promise<Proposal> {
+  if (USE_MOCKS) return mockProposal.openProposal(id);
+  const { data, error, response } = await getApiClient().POST(
+    "/proposals/{proposal_id}/open",
+    { params: { path: { proposal_id: id } } },
+  );
+  if (!data) fail(error, response);
+  return data;
+}
+
+/** POST /proposals/{id}/approve: the human gate (409 lists every blocker). */
+export async function approveProposal(
+  id: number,
+  approvedBy: string,
+  note: string | null,
+): Promise<Proposal> {
+  if (USE_MOCKS) return mockProposal.approveProposal(id, approvedBy, note);
+  const { data, error, response } = await getApiClient().POST(
+    "/proposals/{proposal_id}/approve",
+    {
+      params: { path: { proposal_id: id } },
+      body: { approved_by: approvedBy, note },
+    },
+  );
+  if (!data) fail(error, response);
+  return data;
+}
+
+/** POST /proposals/{id}/sections/{key}/edit: a person's text, saved as a new (unreviewed) version. */
+export async function editSection(
+  id: number,
+  key: string,
+  body: string,
+  editedBy: string,
+  note: string | null,
+): Promise<Proposal> {
+  if (USE_MOCKS) return mockProposal.editSection(id, key, body, editedBy);
+  const { data, error, response } = await getApiClient().POST(
+    "/proposals/{proposal_id}/sections/{section_key}/edit",
+    {
+      params: { path: { proposal_id: id, section_key: key } },
+      body: { body, edited_by: editedBy, note },
+    },
+  );
+  if (!data) fail(error, response);
+  return data;
+}
+
+/** POST /proposals/{id}/review: 202 + a run that reviews the latest version (no automatic revision). */
+export async function reviewProposal(id: number): Promise<PipelineRunView> {
+  if (USE_MOCKS) return mockProposal.reviewProposal(id);
+  const { data, error, response } = await getApiClient().POST(
+    "/proposals/{proposal_id}/review",
+    { params: { path: { proposal_id: id } } },
+  );
+  if (!data) fail(error, response);
+  return data;
+}
+
+/** GET /proposals/{id}/checklist: the attachment checklist (present / expiring / missing). */
+export async function getChecklist(id: number): Promise<ChecklistItem[]> {
+  if (USE_MOCKS) return mockProposal.getChecklist(id);
+  const { data, error, response } = await getApiClient().GET(
+    "/proposals/{proposal_id}/checklist",
+    { params: { path: { proposal_id: id } }, cache: "no-store" },
+  );
+  if (!data) fail(error, response);
+  return data;
+}
+
+export type ExportKind = "docx" | "pdf" | "zip";
+
+/** Download link of an approved version: the bid document (DOCX/PDF) or the whole package (ZIP). */
+export function exportUrl(id: number, kind: ExportKind): string {
+  if (USE_MOCKS) return mockProposal.exportUrl(id, kind);
+  const path =
+    kind === "zip" ? `/proposals/${id}/package` : `/proposals/${id}/export/${kind}`;
+  return `${PUBLIC_API_URL}${path}`;
+}
+
+/** The proposal page's data: tender, versions, the shown version and the KB chunks it cites. */
+export type ProposalBundle = {
+  tender: TenderDetail;
+  versions: Proposal[];
+  proposal: Proposal | null;
+  chunks: Record<number, KBChunkView>;
+  checklist: ChecklistItem[] | null;
+};
+
+/**
+ * Tender + versions + the chosen version (default: the latest) + its cited chunk text. The chunk text and
+ * the checklist are best effort: on failure the page still renders, with chunk ids and no checklist.
+ */
+export async function loadProposalBundle(
+  tenderId: number,
+  proposalId?: number | null,
+): Promise<ProposalBundle | null> {
+  const [tender, versions] = await Promise.all([
+    getTender(tenderId),
+    listProposals(tenderId).catch((e) => {
+      if (e instanceof ApiError && e.status === 404) return [] as Proposal[];
+      throw e;
+    }),
+  ]);
+  if (!tender) return null;
+  const proposal =
+    versions.find((v) => v.id === proposalId) ?? versions[0] ?? null;
+  const chunkIds = uniq(
+    (proposal?.sections ?? []).flatMap((s) => s.cited_chunk_ids ?? []),
+  );
+  const [chunkList, checklist] = await Promise.all([
+    listChunks(chunkIds).catch((): KBChunkView[] => []),
+    proposal
+      ? getChecklist(proposal.id).catch((): ChecklistItem[] | null => null)
+      : Promise.resolve(null),
+  ]);
+  return {
+    tender,
+    versions,
+    proposal,
+    chunks: Object.fromEntries(chunkList.map((c) => [c.chunk_id, c])),
+    checklist,
+  };
+}
+
+// --- runs page -----------------------------------------------------------------------------------------
+
+export type AgentRunFilters = NonNullable<
+  operations["list_agent_runs_agent_runs_get"]["parameters"]["query"]
+>;
+
+/** GET /agent-runs: the audit log, newest first. */
+export async function listAgentRuns(
+  filters: AgentRunFilters = {},
+): Promise<AgentRunView[]> {
+  if (USE_MOCKS) return mockRuns.listAgentRuns(filters);
+  const { data, error, response } = await getApiClient().GET("/agent-runs", {
+    params: { query: filters },
+    cache: "no-store",
+  });
+  if (!data) fail(error, response);
+  return data;
+}
+
+/** GET /runs: pipeline runs, newest first. */
+export async function listRuns(limit = 20): Promise<PipelineRunView[]> {
+  if (USE_MOCKS) return mockRuns.listRuns(limit);
+  const { data, error, response } = await getApiClient().GET("/runs", {
+    params: { query: { limit } },
+    cache: "no-store",
+  });
+  if (!data) fail(error, response);
+  return data;
+}
+
+const STAGES = ["scout", "matching", "compliance", "proposal", "review"] as const;
+
+/** URL search params -> GET /agent-runs filters (invalid values dropped). */
+export function parseAgentRunFilters(sp: SearchParams): AgentRunFilters {
+  const ok = Array.isArray(sp.ok) ? sp.ok[0] : sp.ok;
+  const filters: AgentRunFilters = {
+    stage: pick(sp.stage, STAGES),
+    ok: ok === "true" ? true : ok === "false" ? false : undefined,
+    tender_id: int(sp.tender_id, 1, 999_999_999),
+    pipeline_run_id: int(sp.run, 1, 999_999_999),
+    limit: 100,
+  };
+  return Object.fromEntries(
+    Object.entries(filters).filter(([, v]) => v !== undefined),
+  ) as AgentRunFilters;
 }
 
 type SearchParams = Record<string, string | string[] | undefined>;

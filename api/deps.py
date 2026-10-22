@@ -20,8 +20,9 @@ def get_llm_client() -> LLMClient:
 
 
 def get_now() -> datetime:
-    """Current time in Nepal (deadline checks, days left). Tests pin it."""
-    return datetime.now(NPT)
+    """Current time in Nepal (deadline checks, days left). Tests pin it; so does DEMO_NOW for a rehearsed demo."""
+    pinned = get_settings().demo_now
+    return pinned.astimezone(NPT) if pinned else datetime.now(NPT)
 
 
 def get_seed_dir() -> Path:

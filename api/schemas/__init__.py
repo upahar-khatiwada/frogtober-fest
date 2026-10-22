@@ -42,9 +42,9 @@ from schemas.enums import (
 )
 from schemas.match import MatchAssessment, MatchResult, MatchSignal
 from schemas.proposal import (ApprovalRequest, ChecklistItem, Proposal, ProposalRequest, ProposalSection, ProposalSectionDraft,
-                              ProposalSummary, ResolvedPlaceholder, SectionFact, SectionFlag)
+                              ProposalSummary, ResolvedPlaceholder, SectionEditRequest, SectionFact, SectionFlag)
 from schemas.review import ReviewAssessment, ReviewCheck, ReviewGap, ReviewGapDraft, ReviewReport, ReviewScores
-from schemas.runs import (AgentRun, AgentRunRecord, AnalyzeRequest, PipelineRunDetail, PipelineRunView, ProgressItem,
+from schemas.runs import (AgentRun, AgentRunRecord, AgentRunView, AnalyzeRequest, PipelineRunDetail, PipelineRunView, ProgressItem,
                           StageProgress, StageRun)
 from schemas.scout import ExtractedDoc, Grounded, TenderExtraction
 from schemas.tender import (BidSecurity, FieldSource, RequiredDoc, Requirement, ReviewFlag, SecurityCalc, TenderCriteria,
@@ -70,6 +70,8 @@ __all__ = [
     "ExtractedDoc",
     "AgentRun",
     "AgentRunRecord",
+    "AgentRunView",
+    "SectionEditRequest",
     "AnalyzeRequest",
     "PipelineRunDetail",
     "PipelineRunView",

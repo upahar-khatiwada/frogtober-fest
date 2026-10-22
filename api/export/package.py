@@ -30,7 +30,7 @@ from export.content import BidPackage, bs_ad, build_package
 from export.docx import render_docx
 from export.pdf import render_pdf
 from nepal.dates import NPT, ad_to_bs
-from schemas import ChecklistStatus, ProposalStatus, TenderRecord
+from schemas import ChecklistItem, ChecklistStatus, ComplianceView, Proposal, ProposalStatus, TenderRecord
 
 CHECKLIST_FIELDS = ("document", "doc_type", "mandatory", "fiscal_year_bs", "status", "files", "expires_on_ad",
                     "expires_on_bs", "rule_id", "compliance_status", "note")
@@ -69,9 +69,18 @@ def _agent_runs(session: Session, tender_id: int) -> list[dict[str, Any]]:
             for r in rows]
 
 
-def build(session: Session, row: ProposalRow, *, now: datetime) -> BuiltPackage:
-    """The ZIP for one approved proposal version. Raises PackageNotReady."""
-    if row.status != ProposalStatus.APPROVED.value:
+@dataclass
+class Prepared:
+    tender: Tender
+    record: TenderRecord
+    proposal: Proposal
+    compliance: ComplianceView | None
+    package: BidPackage
+
+
+def prepare(session: Session, row: ProposalRow, *, now: datetime, approved_only: bool = True) -> Prepared:
+    """The document model of one proposal version. Raises PackageNotReady (not approved, or records missing)."""
+    if approved_only and row.status != ProposalStatus.APPROVED.value:
         raise PackageNotReady(f"proposal {row.id} (version {row.version}) is {row.status}; only an approved version "
                               f"is packaged (POST /proposals/{row.id}/approve)")
     tender = session.get(Tender, row.tender_id)
@@ -85,6 +94,26 @@ def build(session: Session, row: ProposalRow, *, now: datetime) -> BuiltPackage:
     documents = load_document_meta(session, company_row.id)
     package = build_package(record=record, company=company, proposal=proposal, compliance=compliance,
                             documents=documents, now=now, tender_id=tender.id)
+    return Prepared(tender, record, proposal, compliance, package)
+
+
+def checklist(session: Session, row: ProposalRow, *, now: datetime) -> list[ChecklistItem]:
+    """The attachment checklist of any version (the proposal page shows it inline; no approval needed to read it)."""
+    return prepare(session, row, now=now, approved_only=False).package.checklist
+
+
+def render(session: Session, row: ProposalRow, fmt: str, *, now: datetime) -> tuple[str, bytes]:
+    """(filename, bytes) of the approved version's bid package as `pdf` or `docx`, the same file as in the ZIP."""
+    package = prepare(session, row, now=now).package
+    renderer = {"pdf": render_pdf, "docx": render_docx}[fmt]
+    return f"01_{package.file_stem}.{fmt}", renderer(package, generated=now)
+
+
+def build(session: Session, row: ProposalRow, *, now: datetime) -> BuiltPackage:
+    """The ZIP for one approved proposal version. Raises PackageNotReady."""
+    prepared = prepare(session, row, now=now)
+    tender, record, proposal, compliance, package = (prepared.tender, prepared.record, prepared.proposal,
+                                                     prepared.compliance, prepared.package)
 
     files: dict[str, bytes] = {
         f"01_{package.file_stem}.pdf": render_pdf(package, generated=now),

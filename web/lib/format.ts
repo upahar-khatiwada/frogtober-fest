@@ -47,3 +47,16 @@ export function formatNprShort(amount: number, lang: Lang = "en"): string {
   }
   return formatNpr(amount, lang);
 }
+
+/** Run durations: 840 -> "840 ms", 6100 -> "6.1 s", 85500 -> "1 min 26 s" (Devanagari digits in Nepali). */
+export function formatDuration(ms: number | null | undefined, lang: Lang = "en"): string {
+  if (ms == null) return "–";
+  let text: string;
+  if (ms < 1000) text = `${Math.round(ms)} ms`;
+  else if (ms < 60_000) text = `${trimDecimals(ms / 1000, ms < 10_000 ? 1 : 0)} s`;
+  else {
+    const s = Math.round(ms / 1000);
+    text = `${Math.floor(s / 60)} min ${s % 60} s`;
+  }
+  return digits(text, lang);
+}

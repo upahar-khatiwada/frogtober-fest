@@ -13,12 +13,24 @@ import type {
 import type { components } from "@/lib/api/types";
 
 import { MOCK_DOCUMENTS, mockDeadline } from "./data";
+import {
+  latestSummary,
+  markGenerated,
+  proposalStatus,
+  reviewRunView,
+} from "./proposal-api";
 
 type S = components["schemas"];
 
 const MOCK_IDS = [1, 27];
 let overridden = false;
-const runs = new Map<number, { startedAt: number; tenderId: number }>();
+type MockRun = {
+  startedAt: number;
+  tenderId: number;
+  kind: "analyze" | "proposal";
+};
+const runs = new Map<number, MockRun>();
+const RUN_MS = 3000;
 
 const delay = (ms = 150) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -50,6 +62,30 @@ const CHUNKS: KBChunkView[] = [
     expires_on: LICENCE_DOC.expires_on,
     is_expired: false,
     fiscal_year_bs: "2083/84",
+  },
+  {
+    chunk_id: 7,
+    document_id: 5,
+    filename: "04_experience_certificate.docx",
+    doc_type: "experience_certificate",
+    chunk_index: 0,
+    content:
+      "Work Completion Certificate\nVyas Municipality certifies that Annapurna Demo Nirman Sewa Pvt. Ltd. completed the gravelling and side-drain works of the Vyas-Damauli link road. Contract amount: Rs 1,85,40,000. Completed: 2081-11-20 BS.",
+    expires_on: null,
+    is_expired: null,
+    fiscal_year_bs: null,
+  },
+  {
+    chunk_id: 21,
+    document_id: 6,
+    filename: "05_company_profile.pdf",
+    doc_type: "company_profile",
+    chunk_index: 0,
+    content:
+      "Company Profile: Annapurna Demo Nirman Sewa Pvt. Ltd., Pokhara. Rural roads, gravelling, drainage and small bridges in Gandaki Province. Average annual construction turnover over the last three fiscal years: Rs 5.03 crore. Typical road works are planned in mobilisation, earthwork, structures and surfacing phases.",
+    expires_on: null,
+    is_expired: null,
+    fiscal_year_bs: null,
   },
 ];
 
@@ -170,6 +206,57 @@ const ITEMS: S["ComplianceItem"][] = [
   },
 ];
 
+const REQUIREMENTS_001: S["Requirement"][] = [
+  {
+    text: "Valid firm registration and construction licence of class D or above",
+    mandatory: true,
+    category: "eligibility",
+    source_quote:
+      'Bidders must hold a valid construction licence of class "D" or above.',
+  },
+  {
+    text: "Tax clearance certificate for F/Y 2082/83",
+    mandatory: true,
+    category: "eligibility",
+    source_quote:
+      "Copy of tax clearance certificate of F/Y 2082/83 or proof of tax return submission.",
+  },
+  {
+    text: "At least one similar road contract of Rs 60 lakh or more in the last 7 years",
+    mandatory: true,
+    category: "experience",
+    source_quote:
+      "Successful completion of at least one similar road work of value not less than Rs. 60,00,000 within the last seven years.",
+  },
+  {
+    text: "Average annual turnover of at least Rs 1,50,00,000",
+    mandatory: true,
+    category: "financial",
+    source_quote:
+      "Average annual construction turnover of the best three years within the last five fiscal years of at least Rs. 1,50,00,000.",
+  },
+  {
+    text: "Work programme showing completion within the contract period",
+    mandatory: false,
+    category: "technical",
+    source_quote:
+      "Bidders shall submit a work programme for completion within 150 days.",
+  },
+  {
+    text: "List of key equipment (roller, excavator, tipper) owned or leased",
+    mandatory: false,
+    category: "equipment",
+    source_quote:
+      "Availability of key equipment: one vibratory roller, one excavator and two tippers.",
+  },
+  {
+    text: "ISO 9001 quality certificate",
+    mandatory: false,
+    category: "other",
+    source_quote: "ISO 9001 certification will be an advantage.",
+  },
+];
+
 function buildDetail(id: number): TenderDetail | null {
   if (!MOCK_IDS.includes(id)) return null;
   const clean = id === 27;
@@ -232,7 +319,7 @@ function buildDetail(id: number): TenderDetail | null {
     domestic_preference: false,
     jv_allowed: true,
     required_docs: [],
-    requirements: [],
+    requirements: clean ? [] : REQUIREMENTS_001,
     bid_security_due: {
       amount_npr: 446_000,
       valid_until: "2027-03-29",
@@ -327,9 +414,11 @@ function buildDetail(id: number): TenderDetail | null {
       "[model] Rural road gravelling is the company's core service [chunk 3]",
     ],
   };
-  const status = blocked && !accepted ? "blocked" : "checked";
+  const status =
+    proposalStatus(id) ?? (blocked && !accepted ? "blocked" : "checked");
   return {
     id,
+    latest_proposal: proposalStatus(id) ? latestSummary(id) : null,
     source_url: `seed://seed_tenders/${id}`,
     status,
     deadline: deadline.ad,
@@ -362,15 +451,87 @@ export async function overrideCompliance(id: number): Promise<TenderDetail> {
 export async function analyzeTender(id: number): Promise<PipelineRunView> {
   await delay(200);
   const runId = Math.max(0, ...runs.keys()) + 1;
-  runs.set(runId, { startedAt: Date.now(), tenderId: id });
+  runs.set(runId, { startedAt: Date.now(), tenderId: id, kind: "analyze" });
   return runView(runId, Date.now());
+}
+
+/** POST /tenders/{id}/proposal: a mock Proposal + Review run with section-by-section progress. */
+export async function generateProposal(id: number): Promise<PipelineRunView> {
+  await delay(200);
+  const detail = buildDetail(id);
+  if (!detail?.compliance?.proposal_allowed)
+    throw new Error(`tender ${id} is blocked by hard compliance failures`);
+  const runId = Math.max(0, ...runs.keys()) + 1;
+  runs.set(runId, { startedAt: Date.now(), tenderId: id, kind: "proposal" });
+  return runView(runId, Date.now());
+}
+
+const SECTION_TITLES = [
+  "Cover letter",
+  "Bidder information and eligibility",
+  "Work plan and schedule",
+  "Relevant experience",
+  "Key equipment",
+  "Financial capacity",
+  "Declarations",
+];
+const DRAFT_MS = 2000;
+
+function proposalRunView(
+  runId: number,
+  entry: MockRun,
+  now: number,
+): PipelineRunView {
+  const elapsed = now - entry.startedAt;
+  const done = elapsed >= RUN_MS;
+  if (done) markGenerated();
+  const total = SECTION_TITLES.length;
+  const drafted = Math.min(total, Math.floor((elapsed / DRAFT_MS) * total));
+  const draftingDone = elapsed >= DRAFT_MS;
+  const iso = new Date(entry.startedAt).toISOString();
+  return {
+    id: runId,
+    tender_id: entry.tenderId,
+    target: "reviewed",
+    status: done ? "succeeded" : "running",
+    start_status: "checked",
+    end_status: done ? "reviewed" : null,
+    stages: [
+      {
+        stage: "proposal",
+        status: draftingDone ? "ok" : "running",
+        from_status: "checked",
+        to_status: draftingDone ? "drafted" : null,
+        progress: {
+          done: drafted,
+          total,
+          current: draftingDone ? null : (SECTION_TITLES[drafted] ?? null),
+          items: SECTION_TITLES.map((title, i) => ({
+            key: String(i),
+            title,
+            status: i < drafted ? "ok" : i === drafted ? "running" : "pending",
+          })),
+        },
+      },
+      {
+        stage: "review",
+        status: done ? "ok" : draftingDone ? "running" : "pending",
+        from_status: "drafted",
+        to_status: done ? "reviewed" : null,
+      },
+    ],
+    created_at: iso,
+    started_at: iso,
+    finished_at: done ? new Date(entry.startedAt + RUN_MS).toISOString() : null,
+  };
 }
 
 function runView(runId: number, now: number): PipelineRunView {
   const entry = runs.get(runId);
   if (!entry) throw new Error(`No run ${runId}`);
+  if (entry.kind === "proposal") return proposalRunView(runId, entry, now);
   const elapsed = now - entry.startedAt;
-  const done = elapsed >= 3000;
+  const done = elapsed >= RUN_MS;
   const blocked = entry.tenderId === 1 && !overridden;
   const iso = new Date(entry.startedAt).toISOString();
   return {
@@ -414,6 +575,8 @@ function runView(runId: number, now: number): PipelineRunView {
 
 export async function getRun(runId: number): Promise<PipelineRunDetail> {
   await delay(100);
+  const review = reviewRunView(runId);
+  if (review) return { ...review, agent_runs: [] };
   return { ...runView(runId, Date.now()), agent_runs: [] };
 }
 

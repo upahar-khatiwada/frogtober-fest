@@ -701,3 +701,66 @@ def revise_proposal(session: Session, client: LLMClient, tender: Tender, row: Pr
                              "citation_rate": citation_rate(sections),
                              "flags": {s.key: [f.kind.value for f in s.flags] for s in sections if s.flags}})
     return new_row, revised
+
+
+# --- a person's edit ------------------------------------------------------------------------------------------
+
+HUMAN_MODEL = "human"  # agent_runs.model for a person's action (as agents.review's approval row)
+# Markers code writes into a body, and the flag that reported each. A flag goes once its marker is edited out.
+_MARKER_FLAGS = {K.MISSING_VALUE: "[MISSING:", K.UNKNOWN_PLACEHOLDER: "[UNKNOWN:", K.FACT_NOT_VERBATIM: "[UNVERIFIED:",
+                 K.UNSOURCED_FIGURE: "⟦unsourced:"}
+EDITABLE = {TenderStatus.DRAFTED, TenderStatus.REVIEWED, TenderStatus.FAILED}
+
+
+def edited_section(section: ProposalSection, body: str, edited_by: str, now: datetime) -> ProposalSection:
+    """The section with a person's text. Citations are kept (the person edits the drafted, cited text); flags whose
+    marker is gone are dropped; a hand-written stub stays visibly ungrounded (hard rule 8)."""
+    flags: list[SectionFlag] = []
+    for flag in section.flags:
+        marker = _MARKER_FLAGS.get(flag.kind)
+        if marker is not None and marker not in body:
+            continue
+        if flag.kind is K.NO_KB_MATERIAL:  # written by hand now, but still backed by no KB chunk
+            flag = SectionFlag(kind=K.UNGROUNDED, detail="written by hand; cites no knowledge-base chunk")
+        flags.append(flag)
+    return section.model_copy(update={"body": body, "body_template": body, "flags": flags,
+                                      "edited_by": edited_by, "edited_at": now})
+
+
+def edit_section(session: Session, row: ProposalRow, key: str, *, body: str, edited_by: str, note: str | None,
+                 now: datetime) -> ProposalRow:
+    """Save a person's edit of one section as a new version (the edited one is kept). Raises ValueError (-> 409).
+
+    The new version is a draft with no review, so it cannot be approved until Review runs on it again
+    (POST /proposals/{id}/review). Writes an audit row (stage proposal, model "human").
+    """
+    from pipeline.orchestrator import active_run  # the orchestrator imports this module
+
+    tender = session.get(Tender, row.tender_id)
+    latest = latest_proposal(session, row.tender_id)
+    if TenderStatus(tender.status) not in EDITABLE:
+        raise ValueError(f"tender {tender.id} is {tender.status}; only a drafted or reviewed proposal can be edited")
+    if latest is not None and latest.id != row.id:
+        raise ValueError(f"version {row.version} is not the latest (version {latest.version}); edit the latest version")
+    if active_run(session, tender.id) is not None:
+        raise ValueError(f"tender {tender.id} has a pipeline run in progress")
+    sections = [ProposalSection.model_validate(s) for s in row.sections]
+    index = next((i for i, s in enumerate(sections) if s.key == key), None)
+    if index is None:
+        raise LookupError(f"version {row.version} has no section {key!r}")
+    if sections[index].body == body:
+        raise ValueError(f"section {key!r} is unchanged")
+    sections[index] = edited_section(sections[index], body, edited_by, now)
+    new_row = ProposalRow(tender_id=tender.id, version=next_version(session, tender.id), language=row.language,
+                          sections=[s.model_dump(mode="json") for s in sections], status=ProposalStatus.DRAFT.value)
+    session.add(new_row)
+    session.flush()
+    action = {"action": "edit", "proposal_id": new_row.id, "version": new_row.version, "edited_from": row.version,
+              "section": key, "edited_by": edited_by, "note": note, "edited_at": now.isoformat()}
+    session.add(AgentRunRow(
+        tender_id=tender.id, stage=Stage.PROPOSAL.value, model=HUMAN_MODEL,
+        input_hash=hashlib.sha256(json.dumps({**action, "body": body}, sort_keys=True).encode()).hexdigest(),
+        output_json=action, latency_ms=0, ok=True, attempts=1))
+    tender.updated_at = func.now()
+    session.commit()
+    return new_row

@@ -39,6 +39,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <PreferencesProvider>
+          <a
+            href="#main"
+            className="sr-only z-20 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+          >
+            <T k="app.skip" />
+          </a>
           <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
             <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
               <Link href="/" className="flex items-baseline gap-2">
@@ -58,7 +64,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               </div>
             )}
           </header>
-          <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
+          <main id="main" tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 outline-none">{children}</main>
         </PreferencesProvider>
       </body>
     </html>

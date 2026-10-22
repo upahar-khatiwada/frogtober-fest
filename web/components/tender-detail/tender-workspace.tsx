@@ -1,13 +1,14 @@
 "use client";
 
-import { AlertTriangle, LoaderCircle, Play } from "lucide-react";
+import { AlertTriangle, FileText, LoaderCircle, Play } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { DeadlineDisplay } from "@/components/deadline-display";
+import { VerdictBadge } from "@/components/proposal/review-panel";
 import { StatusBadge } from "@/components/tenders/badges";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   analyzeTender,
@@ -246,6 +247,19 @@ export function TenderWorkspace({
               {t("td.override")}
             </Button>
           )}
+          {detail.latest_proposal && !running && (
+            <Link
+              href={`/tenders/${id}/proposal`}
+              className={buttonVariants({ variant: "default" })}
+              data-testid="open-proposal"
+            >
+              <FileText aria-hidden="true" />
+              {t("td.openProposal", { version: detail.latest_proposal.version })}
+            </Link>
+          )}
+          {detail.latest_proposal?.verdict && !running && (
+            <VerdictBadge verdict={detail.latest_proposal.verdict} />
+          )}
         </div>
         {whyDisabled && (
           <p id="generate-why" className="text-xs text-muted-foreground">
@@ -293,11 +307,19 @@ export function TenderWorkspace({
               {run.stages.map((s) => (
                 <li key={s.stage}>
                   <Badge variant="outline">
-                    {label("stage", s.stage)}: {label("stage_status", s.status)}
+                    {label("stage", s.stage)}: {label("stage_status", s.status ?? "pending")}
                   </Badge>
                 </li>
               ))}
             </ol>
+            {run.stages
+              .filter((s) => s.progress && s.status === "running")
+              .map((s) => (
+                <p key={s.stage} className="text-xs text-muted-foreground" data-testid="run-progress">
+                  {t("td.run.progress", { done: s.progress!.done, total: s.progress!.total })}
+                  {s.progress!.current ? ` · ${t("td.run.current", { title: s.progress!.current })}` : ""}
+                </p>
+              ))}
             {run.error && (
               <p className="text-sm text-destructive">
                 {t("td.run.error", { error: run.error })}

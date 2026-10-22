@@ -93,7 +93,7 @@ Runner = Callable[[Session, LLMClient, Tender], object]
 
 
 def default_runners(settings: Settings | None = None, now: datetime | None = None, *,
-                    force_english: bool | None = None) -> dict[Stage, Runner | None]:
+                    force_english: bool | None = None, auto_revise: bool | None = None) -> dict[Stage, Runner | None]:
     def matching(session: Session, client: LLMClient, tender: Tender) -> object:
         result = run_matching(session, client, tender, settings=settings, now=now, rematch=True)
         if tender.status != S.MATCHED.value:  # not pursued (or failed): old compliance items are stale
@@ -107,7 +107,8 @@ def default_runners(settings: Settings | None = None, now: datetime | None = Non
         Stage.COMPLIANCE: lambda session, client, tender: run_compliance(session, client, tender, settings=settings, now=now),
         Stage.PROPOSAL: lambda session, client, tender: run_proposal(session, client, tender, settings=settings, now=now,
                                                                     force_english=force_english),
-        Stage.REVIEW: lambda session, client, tender: run_review(session, client, tender, settings=settings, now=now),
+        Stage.REVIEW: lambda session, client, tender: run_review(session, client, tender, settings=settings, now=now,
+                                                                auto_revise=auto_revise),
     }
 
 

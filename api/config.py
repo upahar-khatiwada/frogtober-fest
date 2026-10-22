@@ -6,9 +6,11 @@ point at a different Ollama host (or an open-weight-only hosted fallback)
 without a code change.
 """
 
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _API_DIR = Path(__file__).resolve().parent
@@ -30,6 +32,10 @@ class Settings(BaseSettings):
     # request hash, plus embeddings. A hit skips the model; a miss calls it. Empty = off.
     # Written by `python -m api.scripts.precache_demo`.
     llm_replay_cache: str = ""
+    # Pinned clock for a rehearsed demo (ISO datetime with offset, e.g. 2026-10-22T10:00:00+05:45). Unset = real time.
+    # Proposal text carries today's date and Review reads it, so the replay cache only answers Review on the clock
+    # it was recorded at: record (`precache_demo --target reviewed`) and serve with the same DEMO_NOW.
+    demo_now: datetime | None = None
 
     # --- Database ---
     database_url: str = "postgresql://tenderly:tenderly@localhost:5432/tenderly"
@@ -92,6 +98,11 @@ class Settings(BaseSettings):
     @property
     def scraper_ua(self) -> str:
         return f"{self.scraper_user_agent[:-1]}; +{self.scraper_contact})" if self.scraper_contact else self.scraper_user_agent
+
+    @field_validator("demo_now", mode="before")
+    @classmethod
+    def _empty_demo_now_is_unset(cls, value: object) -> object:
+        return None if value == "" else value  # docker-compose passes DEMO_NOW="" when it is not set
 
     @property
     def cors_origins(self) -> list[str]:

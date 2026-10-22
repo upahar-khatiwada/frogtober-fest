@@ -3,6 +3,9 @@
 A run is one orchestrated pass over one tender (`pipeline_runs`, written by pipeline/orchestrator.py),
 started by POST /tenders/{id}/analyze. Both endpoints first reap runs whose worker stopped making
 progress, so a poller never waits on a run that can no longer finish.
+
+GET /agent-runs is the audit log itself (spec section 11 `agent_runs`, hard rule 9): every model call, code-only stage
+row and human action (approvals, section edits), whether or not a pipeline run wrote it.
 """
 
 from typing import Annotated
@@ -15,9 +18,10 @@ from config import Settings
 from db.models import AgentRunRow, PipelineRun, Tender
 from deps import get_session, get_sessionmaker, get_settings
 from pipeline.orchestrator import reap_from_settings
-from schemas import AgentRun, PipelineRunDetail, PipelineRunView, RunStatus
+from schemas import AgentRun, AgentRunView, PipelineRunDetail, PipelineRunView, RunStatus, Stage
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+agent_runs_router = APIRouter(prefix="/agent-runs", tags=["runs"])
 
 
 def run_view(run: PipelineRun, title: str | None) -> PipelineRunView:
@@ -77,3 +81,27 @@ def get_run(
     run, title = row
     agent_runs = session.scalars(select(AgentRunRow).where(AgentRunRow.pipeline_run_id == run_id).order_by(AgentRunRow.id))
     return PipelineRunDetail(**run_view(run, title).model_dump(), agent_runs=[agent_run_view(r) for r in agent_runs])
+
+
+@agent_runs_router.get("")
+def list_agent_runs(
+    session: Annotated[Session, Depends(get_session)],
+    tender_id: int | None = None,
+    stage: Stage | None = None,
+    ok: bool | None = None,
+    pipeline_run_id: int | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[AgentRunView]:
+    """agent_runs rows, newest first, with the tender title (the Runs page audit log)."""
+    query = select(AgentRunRow, Tender.title).outerjoin(Tender, Tender.id == AgentRunRow.tender_id)
+    if tender_id is not None:
+        query = query.where(AgentRunRow.tender_id == tender_id)
+    if stage is not None:
+        query = query.where(AgentRunRow.stage == stage.value)
+    if ok is not None:
+        query = query.where(AgentRunRow.ok.is_(ok))
+    if pipeline_run_id is not None:
+        query = query.where(AgentRunRow.pipeline_run_id == pipeline_run_id)
+    query = query.order_by(desc(AgentRunRow.id)).limit(limit).offset(offset)
+    return [AgentRunView(**agent_run_view(row).model_dump(), tender_title=title) for row, title in session.execute(query)]

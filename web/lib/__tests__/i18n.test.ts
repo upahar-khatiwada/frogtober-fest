@@ -36,7 +36,7 @@ describe("translate", () => {
   });
 
   it("leaves unknown placeholders visible", () => {
-    expect(translate("en", "runs.placeholder")).toContain("{id}");
+    expect(translate("en", "pp.s.chunk")).toContain("{id}");
   });
 
   it("labels API enum values and passes unknown ones through", () => {

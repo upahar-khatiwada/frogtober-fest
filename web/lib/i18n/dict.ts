@@ -6,6 +6,7 @@
 import type { Lang } from "@/lib/format";
 import { toDevanagariDigits } from "@/lib/nepal/calendar";
 import { DETAIL_EN, DETAIL_NE } from "@/lib/i18n/detail-messages";
+import { PROPOSAL_EN, PROPOSAL_NE } from "@/lib/i18n/proposal-messages";
 
 const en = {
   "app.name": "Tenderly",
@@ -131,8 +132,7 @@ const en = {
   "kb.noExpiry": "No expiry",
   "kb.loadFailed": "Could not load documents: {error}",
 
-  "runs.title": "Pipeline runs",
-  "runs.placeholder": "The run log (stage, status, duration, model) is the next frontend task. The API is ready: GET /runs and GET /runs/{id}.",
+  "runs.title": "Runs and audit log",
 
   "enum.procurement_type.goods": "Goods",
   "enum.procurement_type.works": "Works",
@@ -191,6 +191,7 @@ const en = {
   "enum.ingest_status.needs_ocr": "Scanned (needs OCR)",
   "enum.ingest_status.failed": "Failed",
   ...DETAIL_EN,
+  ...PROPOSAL_EN,
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -319,8 +320,7 @@ const ne: Record<MessageKey, string> = {
   "kb.noExpiry": "म्याद छैन",
   "kb.loadFailed": "कागजात लोड हुन सकेन: {error}",
 
-  "runs.title": "पाइपलाइन रनहरू",
-  "runs.placeholder": "रन लग (चरण, अवस्था, समय, मोडेल) अर्को फ्रन्टएन्ड काम हो। API तयार छ: GET /runs र GET /runs/{id}।",
+  "runs.title": "रनहरू र अडिट लग",
 
   "enum.procurement_type.goods": "मालसामान",
   "enum.procurement_type.works": "निर्माण कार्य",
@@ -379,13 +379,15 @@ const ne: Record<MessageKey, string> = {
   "enum.ingest_status.needs_ocr": "स्क्यान गरिएको (OCR चाहिन्छ)",
   "enum.ingest_status.failed": "असफल",
   ...DETAIL_NE,
+  ...PROPOSAL_NE,
 };
 
 export const DICTIONARIES: Record<Lang, Record<MessageKey, string>> = { en, ne };
 
 export type EnumKind =
   | "procurement_type" | "method" | "buyer_level" | "province" | "language" | "decision" | "status" | "doc_type" | "ingest_status"
-  | "evaluation_method" | "compliance_status" | "severity" | "run_status" | "stage" | "stage_status";
+  | "evaluation_method" | "compliance_status" | "severity" | "run_status" | "stage" | "stage_status"
+  | "verdict" | "check" | "flag" | "checklist_status" | "gap_source" | "category" | "proposal_status";
 
 /**
  * Look up a label and fill `{name}` placeholders. In Nepali, numeric values are written in

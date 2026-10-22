@@ -56,6 +56,16 @@ class ProposalSection(Contract):
     flags: list[SectionFlag] = Field(default_factory=list)
     requirement_indices: list[int] = Field(default_factory=list, description="TenderRecord.requirements this section answers.")
     placeholders: list[ResolvedPlaceholder] = Field(default_factory=list)
+    edited_by: str | None = Field(None, description="Person who last edited this section by hand (null: as drafted).")
+    edited_at: datetime | None = None
+
+
+class SectionEditRequest(Contract):
+    """POST /proposals/{id}/sections/{key}/edit: a person's text for one section. Saved as a new version."""
+
+    body: NonEmptyStr = Field(max_length=20000, description="The section text (Markdown), as the person wrote it.")
+    edited_by: NonEmptyStr = Field(max_length=200)
+    note: str | None = Field(None, max_length=2000)
 
 
 class Proposal(Contract):

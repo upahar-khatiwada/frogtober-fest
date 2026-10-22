@@ -2,10 +2,12 @@
 
 /**
  * UI preferences kept in localStorage: label language (en/ne) and date calendar (BS/AD).
- * Read through useSyncExternalStore, so the server render and hydration use the defaults
- * (English, BS) and the stored choice applies right after, with no hydration mismatch.
+ * Every consumer reads them through its own useSyncExternalStore, so each component's server render and
+ * hydration use the defaults (English, BS) and the stored choice applies right after, with no hydration
+ * mismatch. That includes Suspense boundaries that stream in and hydrate after the stored choice applied
+ * (a shared context value would already be Nepali there while the server HTML is English).
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 
 import type { Lang } from "@/lib/format";
 import { enumLabel, translate, type EnumKind, type MessageKey } from "@/lib/i18n/dict";
@@ -54,22 +56,17 @@ type Prefs = {
   label: (kind: EnumKind, value: string) => string;
 };
 
-const PrefsContext = createContext<Prefs | null>(null);
+const setLang = (value: Lang) => write(LANG_KEY, value);
+const setCalendar = (value: Calendar) => write(CALENDAR_KEY, value);
 
-export function PreferencesProvider({ children }: { children: ReactNode }) {
+/** Preferences (defaults during SSR and each component's hydration; the stored choice right after). */
+export function usePrefs(): Prefs {
   const storedLang = useSyncExternalStore(subscribe, () => read(LANG_KEY), () => null);
   const storedCalendar = useSyncExternalStore(subscribe, () => read(CALENDAR_KEY), () => null);
   const lang: Lang = storedLang === "ne" || storedLang === "en" ? storedLang : DEFAULT_LANG;
   const calendar: Calendar = storedCalendar === "AD" || storedCalendar === "BS" ? storedCalendar : DEFAULT_CALENDAR;
 
-  useEffect(() => {
-    document.documentElement.lang = lang;
-  }, [lang]);
-
-  const setLang = useCallback((value: Lang) => write(LANG_KEY, value), []);
-  const setCalendar = useCallback((value: Calendar) => write(CALENDAR_KEY, value), []);
-
-  const value = useMemo<Prefs>(
+  return useMemo<Prefs>(
     () => ({
       lang,
       calendar,
@@ -78,23 +75,17 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       t: (key, vars) => translate(lang, key, vars),
       label: (kind, v) => enumLabel(lang, kind, v),
     }),
-    [lang, calendar, setLang, setCalendar],
+    [lang, calendar],
   );
-  return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
 }
 
-/** Preferences; outside a provider (e.g. isolated tests) the defaults apply. */
-export function usePrefs(): Prefs {
-  const ctx = useContext(PrefsContext);
-  if (ctx) return ctx;
-  return {
-    lang: DEFAULT_LANG,
-    calendar: DEFAULT_CALENDAR,
-    setLang: () => {},
-    setCalendar: () => {},
-    t: (key, vars) => translate(DEFAULT_LANG, key, vars),
-    label: (kind, v) => enumLabel(DEFAULT_LANG, kind, v),
-  };
+/** Keeps <html lang> in step with the language preference. */
+export function PreferencesProvider({ children }: { children: ReactNode }) {
+  const { lang } = usePrefs();
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+  return <>{children}</>;
 }
 
 /** A translated label, usable from server components. */

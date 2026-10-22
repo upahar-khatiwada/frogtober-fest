@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { CompanyWorkspace } from "@/components/company/company-workspace";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState, LoadingState } from "@/components/states";
 import { getCompany, listDocuments } from "@/lib/api/tenderly";
 import { T } from "@/lib/prefs";
 
@@ -14,9 +14,9 @@ async function CompanyData() {
     data = await Promise.all([getCompany(), listDocuments()]);
   } catch (e) {
     return (
-      <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+      <ErrorState>
         <T k="company.loadFailed" vars={{ error: e instanceof Error ? e.message : String(e) }} />
-      </div>
+      </ErrorState>
     );
   }
   return <CompanyWorkspace company={data[0]} documents={data[1]} />;
@@ -33,7 +33,7 @@ export default function CompanyPage() {
           <T k="company.subtitle" />
         </p>
       </div>
-      <Suspense fallback={<Skeleton className="h-96 w-full rounded-xl" />}>
+      <Suspense fallback={<LoadingState blocks={["h-96 w-full", "h-64 w-full"]} />}>
         <CompanyData />
       </Suspense>
     </div>

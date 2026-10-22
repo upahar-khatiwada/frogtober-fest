@@ -373,6 +373,62 @@
   - Updated: `test_schemas` (ReviewAssessment / ReviewReport rules), `test_proposal` (DraftFake answers Review; the API run is proposal + review), `test_compliance_api` (ends `reviewed`), `test_orchestrator` (missing-runner and approved refusals), `test_tenders_list_api` (an approved tender is refused).
 - **Not run:** Review against a real model (no Ollama here, same as issues 35/40/44/66), and Word/LibreOffice opening the DOCX (python-docx reads it back; schema order is tested).
 
+### Frontend prompt 3: proposal page, review/approval, downloads, /runs audit log, polish, Playwright E2E (2026-10-22) ✅ (mock mode + offline tests; NOT run against a live stack)
+- Read spec §9 again (pages, 2 s polling, approval disabled until verdict is not fail and the proposal was opened). Bun only.
+- **Backend additions (needed by the UI):**
+  - `POST /proposals/{id}/sections/{key}/edit` (`SectionEditRequest`): a person's edit is saved as a **new draft version** (`agents.proposal.edit_section`; latest version only; refused on an approved tender or during a run). Citations are kept, flags whose markers were edited out are dropped, a hand-written `no_kb_material` stub becomes `ungrounded`. `ProposalSection` gained `edited_by` / `edited_at` (JSON only, no migration). Audit row: stage `proposal`, model `human`.
+  - `POST /proposals/{id}/review`: 202 + a run with Review only on the latest unreviewed version, `auto_revise=False` (new `run_review(auto_revise=)` / `default_runners(auto_revise=)`), so the model never rewrites a person's text.
+  - `approval_blockers` now also refuses a version that is not the latest ("version N is newer").
+  - `GET /proposals/{id}/checklist` (any version) and `GET /proposals/{id}/export/{pdf|docx}` (approved only; the same file as in the ZIP). `export/package.py` split into `prepare` / `checklist` / `render` / `build`.
+  - `GET /agent-runs` (filters `tender_id`, `stage`, `ok`, `pipeline_run_id`, paging; `AgentRunView` = row + tender title).
+  - `DEMO_NOW` setting pins `deps.get_now` (empty = real time; passed through docker-compose and `.env.example`).
+  - `precache_demo --through-review 001 --now <ISO>` overrides a blocked seed and records Proposal + Review too (issue 81).
+  - `web/lib/api/types.ts` regenerated; `KBChunkView` now uses the generated type.
+- **`/tenders/[id]/proposal`** (`components/proposal/`):
+  - **Version picker** (`?v=<proposal id>`).
+  - **Sections tab:** a grounded or ungrounded badge on each section, with a warning box on ungrounded ones. Flags are listed, and `[MISSING: …]` / `⟦unsourced: …⟧` markers are highlighted. Each citation expands to the KB chunk text with its filename and doc type. "Answers requirement N" links jump to the requirement. The **inline editor** saves a new version, and the person's name is remembered in localStorage.
+  - **Requirements tab:** each requirement, with the notice's quote, sits side by side with the section text that answers it. Unanswered requirements are red when mandatory and amber when optional. Stubs and model gaps are shown on the row.
+  - **Review panel:** verdict badge, three `role="meter"` score bars with threshold ticks, verdict reasons, the code checks, and gaps as buttons that jump to their section or requirement. An unreviewed latest version gets a **Run review** button, polled every 2 s.
+  - **Approval panel:** four gates (reviewed, verdict not fail, opened after review, latest version), each shown as met or not. Showing a reviewed version calls `POST /open` automatically. Approve stays disabled until every gate is met, then opens a dialog for name and note.
+  - **After approval:** DOCX, PDF and ZIP download links, plus the attachment checklist table inline (status badge, files, valid-until in the preferred calendar, notes).
+  - **Tender page:** an "Open proposal (version N)" link with a verdict badge, and section-by-section progress while drafting.
+- **`/runs`:**
+  - The **audit log** table (time in NPT in the preferred calendar, tender link, stage, ok/failed/cached/attempts, duration, model, shown as "person" or "code" for human and deterministic rows, run link). Each row expands (`aria-expanded`) to the input hash (with a copy button), error, output JSON and raw output.
+  - Recent pipeline runs with per-stage durations.
+  - Stage and status filters live in the URL, plus a refresh button. The page auto-refreshes every 2 s while a run is active.
+- **Polish:**
+  - Shared `components/states.tsx` (EmptyState / ErrorState / LoadingState), now used by the dashboard, company, tender, proposal and runs pages.
+  - `components/date-time.tsx` shows NPT timestamps in the preferred calendar, with the other calendar on hover.
+  - `formatDuration` gives Devanagari digits in Nepali.
+  - A "Skip to content" link, and `#main` is focusable.
+  - All new strings are in English and Nepali (`lib/i18n/proposal-messages.ts`, plus enum kinds verdict, check, flag, checklist_status, gap_source, category, proposal_status).
+  - Tables wrap at narrow widths, and the layout is two columns from `lg`.
+  - **Hydration fix:** `usePrefs()` now subscribes per component instead of reading a shared context. Before this, with Nepali stored, Suspense boundaries that streamed in after the switch hydrated in Nepali against English server HTML, logging "Hydration failed" on `/runs` (seen in the dev log). This also affected the older pages.
+  - Added the shadcn `tabs` component with the CLI.
+- **Mocks:**
+  - `lib/mock/proposal-api.ts` covers tender 1: v1 reviewed `needs_work`, v2 its automatic revision. Edit, re-review, open and approve are emulated with the API's gates.
+  - `lib/mock/runs-api.ts` holds audit rows, including a human approval row, a failed and retried Scout, and cached rows.
+  - `detail-api` gained a Proposal + Review run with progress, `latest_proposal`, requirements and more chunks.
+- **E2E (`web/e2e/demo.spec.mjs`, `web/playwright.config.ts`):** one test runs the whole path:
+  1. Load seeds, then open tender 001 and Analyze.
+  2. The tender is blocked. Generate is disabled, so the test records an override (name and reason).
+  3. The Proposal + Review run completes and the test opens the proposal.
+  4. It checks the sections, expands a citation, checks the requirements tab, and checks the 3 score meters with a verdict other than fail.
+  5. Approve becomes enabled once the open is recorded. The test approves with a name and note.
+  6. It downloads DOCX, PDF and ZIP, and sees the checklist with a missing row.
+  7. On `/runs` it finds the `human` row, expands it, and checks a 64-hex input hash and `"approve"` in the output.
+  8. It checks there is no horizontal scroll at 1024×768 (projector) on the proposal page and on `/runs`. The rest of the test runs at a 1366×768 viewport.
+  - With `E2E_MOCKS=1` the same test runs against mocks. **Bun workarounds** (no Node on this machine):
+    - Under Bun, Playwright does not strip TypeScript types from specs, so the spec is plain ESM with JSDoc.
+    - Playwright's `--remote-debugging-pipe` launch hangs under Bun on Windows. `e2e/fixtures.mjs` starts Playwright's Chromium with a DevTools port and attaches over CDP.
+    - Bun's `node:http` never emits `upgrade` for a WebSocket handshake (it reports a plain 101), so a test-only shim does that handshake over `net`.
+- **Verified:**
+  - Backend: `uv run pytest -q` gives **737 passed, 4 deselected** (was 730). New `tests/test_proposal_page_api.py` (6 tests): edit makes a new version, the old one is untouched and has an audit row; approving an older or unreviewed version is refused; editing an older version, an unknown section, unchanged text or an approved tender is refused; re-review only, with no revision even on `needs_work`; checklist before approval and PDF/DOCX after; `/agent-runs` order and filters; `DEMO_NOW` pinned and empty. `test_precache.py` +1: `--through-review` records proposal and review stages, and `--check` replays offline.
+  - Web: `bunx tsc --noEmit` and `bun run lint` are clean. `bun run test` gives **97 passed** (was 77): `lib/__tests__/proposal.test.ts` (markers, gates incl. instant comparison across offsets, needs_work approvable, open logic, requirement mapping, checklist counts, durations) and `components/__tests__/proposal-page.test.tsx` (citation expand, ungrounded warning and highlighted marker, edit save and the disabled reason, review meters and gap links, approve disabled until opened or on fail, approve dialog, approved-by line in BS + NPT, requirements side by side, runs row expand).
+  - `E2E_MOCKS=1 bunx playwright test`: **1 passed**.
+  - Screenshots at 1366, 1024 and 1920 were checked by eye, plus Nepali/AD on `/runs`. A Nepali-mode navigation across all pages produced no new hydration errors.
+  - **Not run:** the E2E against the real stack, and the recording of the `--through-review` cache. There is no Docker or Ollama on this machine today.
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -479,6 +535,15 @@
 - **The bid form is a skeleton**, with blanks for price and signatory: the bidding document's own form is the authority (NEPAL_CONTEXT §15/§16). The package's first page is an internal sheet marked "remove before submission".
 - **The package is built on demand** from stored rows (no file storage); the ZIP is dated by the injected clock.
 
+- **An edit is a new version, never an in-place change (frontend prompt 3).** The edited draft has no review, so it cannot be approved until Review runs on it again. That re-review never auto-revises: the model may score a person's text but not rewrite it. Citations stay as drafted (the person edits cited text); a hand-written stub is still `ungrounded`, because no KB chunk backs it.
+- **Only the latest version is approvable.** Approving an older version while a newer edit exists would package text the person did not just read.
+- **"Opened" = the page showed a reviewed version.** The proposal page calls `/open` on display, and the approval panel lists the gate. The person cannot approve from the tender page or the API flow without the version being shown after its review.
+- **The checklist is readable before approval; the documents are not.** The checklist helps fix gaps before approving. DOCX/PDF/ZIP stay approval-gated (409).
+- **The audit log is `agent_runs` itself** (`GET /agent-runs`), not pipeline runs. Human approvals and edits are not part of any pipeline run, and the demo proof is "every model call, code step and human action has an input hash and an output".
+- **Pinned demo clock (`DEMO_NOW`)** instead of changing the Review prompt to read placeholder templates. Prompts stay as they are; the cache is recorded and served at the same clock.
+- **Mocks stay per process/tab.** The proposal mock always holds versions on the server, so a reload after a client-side approval shows the server state. The E2E therefore does the projector check before leaving the page, and works the same on mocks and the real stack.
+- **E2E specs are plain ESM + JSDoc, and Chromium is attached over CDP under Bun.** Installing Node would contradict "Bun only". The workarounds live only in `web/e2e/` and switch off under Node.
+
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
 - `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
@@ -504,6 +569,8 @@
   - §8.1: the LLM fills `ReviewAssessment`; code builds `ReviewReport`, which has the extra verdict `needs_work`.
   - §11: `proposals.approved_by`, `approval_note`, `reviewed_at`, `opened_at`.
   - The spec offered "WeasyPrint or ReportLab": ReportLab is used, with HarfBuzz shaping (+ uharfbuzz).
+
+- Frontend prompt 3: §10.2 gains `POST /proposals/{id}/sections/{key}/edit`, `POST /proposals/{id}/review`, `GET /proposals/{id}/checklist`, `GET /proposals/{id}/export/{pdf|docx}` and `GET /agent-runs`. §9.1 `/runs` shows the agent_runs audit log (plus pipeline runs), not only pipeline runs. §11 is unchanged (no migration).
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -619,7 +686,22 @@ New (Prompt 10):
 81. The replay cache (`precache_demo`, issue 72) does not record Proposal/Review. Extend it to `target=reviewed` once the prompts settle, so the demo can show the whole flow offline.
 82. Approval has no authentication (single-company MVP): `approved_by` is whatever the person types, the same as the compliance override.
 
+New (frontend prompt 3):
+83. ~~Issues 55/69/76 (runs page, proposal page, review/approval UI, downloads)~~: done.
+84. **The E2E has not run against the real stack.** On the demo machine:
+    1. `docker compose down -v`, then `docker compose up -d` with GPU.
+    2. Seed the company.
+    3. Record the cache: `precache_demo --seed-company --through-review 001 --now <T>` on a scratch DB, then `--check` with the same flags. Then set `DEMO_NOW=<T>` for the api and recreate the stack.
+    4. Run `cd web && bunx playwright test`.
+    The cache's KB chunk ids must match the demo DB (issue 51), so seed it fresh exactly like the recording.
+85. The real-mode E2E needs a fresh DB each time: it approves 001, and approval is final. A `scripts/reset_demo.py` (truncate tenders + runs, keep the company) would make re-runs one command.
+86. Downloads point straight at `NEXT_PUBLIC_API_URL` (cross-origin anchors). Browsers then ignore `download` and rely on the API's `Content-Disposition: attachment`, which it sends. If the API ever needs auth, route downloads through a Next route handler.
+87. The Bun workarounds in `web/e2e/fixtures.mjs` patch `http.request` for WebSocket upgrades in the test worker only. Re-check on a Bun or Playwright upgrade: Bun may gain the `upgrade` event or the pipe transport, and the shim would then be unnecessary.
+88. New Nepali labels (`lib/i18n/proposal-messages.ts`) are model-written `[VERIFY]` (issue 60).
+89. Mock mode: the proposal page's tender status badge comes from the server mock, which stays `blocked` after a client-side override/approval (state is per process/tab, issue 61).
+90. Editing does not re-run the deterministic Review checks client-side. Flags shown on an edited section are those kept by `edited_section`, and the full picture comes with the re-review.
+
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
-With Ollama up: measure the outstanding numbers (Scout 35, Matching 40, Compliance 44, Proposal citation rate 66) and run Review on 001 (issue 74), then extend the pre-cache to `reviewed` (issue 81). On the frontend: the `/tenders/[id]/proposal` page with versions, per-section flags, citations, the review panel (scores, checks, gaps, verdict reasons), Open → Approve (name + note; disabled on `fail` with the reasons) and the package download (issues 69/76).
+**Next prompt:** on the demo machine with Docker + GPU Ollama, measure the outstanding numbers (Scout 35, Matching 40, Compliance 44, Proposal citation rate 66), run Review on 001 (issue 74), then record the full demo cache (`precache_demo --seed-company --through-review 001 --now <T>`, issue 84) and run the Playwright E2E against the real stack with `DEMO_NOW=<T>`. Commit or document `data/demo_cache/llm_cache.json` (issue 50). Then a Nepali reader pass over all model-written labels (issues 60/68/77/88), `ARCHITECTURE.md` / `AI_DISCLOSURE.md`, and a demo-reset script (issue 85).
