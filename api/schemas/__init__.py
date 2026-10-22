@@ -3,7 +3,7 @@
 These are the contract between stages: code routes, filters, blocks and
 gates on them. Models the LLM fills (passed as `schema=` to
 `pipeline.llm.LLMClient.chat`): TenderExtraction, MatchAssessment,
-ComplianceAssessment, ProposalSection, ReviewReport. The rest are built
+ComplianceAssessment, ProposalSectionDraft, ReviewReport. The rest are built
 by code or entered by the user.
 """
 
@@ -22,11 +22,14 @@ from schemas.enums import (
     NoticeLanguage,
     ProcurementMethod,
     ProcurementType,
+    ProposalLanguage,
     ProposalStatus,
     Province,
     RequirementCategory,
     ReviewVerdict,
     RunStatus,
+    SectionFlagKind,
+    SectionProgress,
     Severity,
     SignalSource,
     Stage,
@@ -35,9 +38,11 @@ from schemas.enums import (
     TenderStatus,
 )
 from schemas.match import MatchAssessment, MatchResult, MatchSignal
-from schemas.proposal import Proposal, ProposalSection
+from schemas.proposal import (Proposal, ProposalRequest, ProposalSection, ProposalSectionDraft, ProposalSummary,
+                              ResolvedPlaceholder, SectionFact, SectionFlag)
 from schemas.review import ReviewGap, ReviewReport, ReviewScores
-from schemas.runs import AgentRun, AgentRunRecord, AnalyzeRequest, PipelineRunDetail, PipelineRunView, StageRun
+from schemas.runs import (AgentRun, AgentRunRecord, AnalyzeRequest, PipelineRunDetail, PipelineRunView, ProgressItem,
+                          StageProgress, StageRun)
 from schemas.scout import ExtractedDoc, Grounded, TenderExtraction
 from schemas.tender import (BidSecurity, FieldSource, RequiredDoc, Requirement, ReviewFlag, SecurityCalc, TenderCriteria,
                             TenderRecord)
@@ -89,8 +94,19 @@ __all__ = [
     "ProcurementMethod",
     "ProcurementType",
     "Proposal",
+    "ProposalLanguage",
+    "ProposalRequest",
     "ProposalSection",
+    "ProposalSectionDraft",
     "ProposalStatus",
+    "ProposalSummary",
+    "ProgressItem",
+    "ResolvedPlaceholder",
+    "SectionFact",
+    "SectionFlag",
+    "SectionFlagKind",
+    "SectionProgress",
+    "StageProgress",
     "Province",
     "RequiredDoc",
     "Requirement",

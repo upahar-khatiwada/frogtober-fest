@@ -15,9 +15,9 @@ itself for code-only work (Matching pre-filters, the Compliance rules layer), or
 when a stage crashed before it could. Rows written during a run are linked to it (`db.runs.pipeline_run_context`).
 
 Resume: a `failed` tender restarts at `resume_status`, derived from what is stored (no record -> Scout;
-no match row -> Matching; a pursued match -> Compliance), because every failing stage drops its own partial
-output. Proposal and Review have no runner yet (agents not built); their steps are wired and tested with
-injected runners.
+no match row -> Matching; a pursued match -> Compliance; stored compliance items that do not block -> Proposal),
+because every failing stage drops its own partial output. Review has no runner yet (agent not built); its step
+is wired and tested with injected runners. Proposal reports section-by-section progress on its stage.
 """
 
 import hashlib
@@ -32,12 +32,13 @@ from sqlalchemy import delete, desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from agents.compliance import run_compliance
+from agents.compliance import latest_override, load_report, override_covers, run_compliance
 from agents.matching import load_company, run_matching
+from agents.proposal import run_proposal
 from agents.scout import run_scout
 from config import Settings, get_settings
 from db.models import AgentRunRow, ComplianceItemRow, Match, PipelineRun, Tender
-from db.runs import pipeline_run_context
+from db.runs import pipeline_run_context, stage_progress_context
 from pipeline.llm import LLMClient
 from schemas import MatchDecision, RunStatus, Stage, StageRun, StageStatus, TenderStatus
 
@@ -89,7 +90,8 @@ TARGETS = tuple(step.ok for step in STEPS)  # `approved` is human-only
 Runner = Callable[[Session, LLMClient, Tender], object]
 
 
-def default_runners(settings: Settings | None = None, now: datetime | None = None) -> dict[Stage, Runner | None]:
+def default_runners(settings: Settings | None = None, now: datetime | None = None, *,
+                    force_english: bool | None = None) -> dict[Stage, Runner | None]:
     def matching(session: Session, client: LLMClient, tender: Tender) -> object:
         result = run_matching(session, client, tender, settings=settings, now=now, rematch=True)
         if tender.status != S.MATCHED.value:  # not pursued (or failed): old compliance items are stale
@@ -101,7 +103,8 @@ def default_runners(settings: Settings | None = None, now: datetime | None = Non
         Stage.SCOUT: lambda session, client, tender: run_scout(session, client, tender),
         Stage.MATCHING: matching,
         Stage.COMPLIANCE: lambda session, client, tender: run_compliance(session, client, tender, settings=settings, now=now),
-        Stage.PROPOSAL: None,  # TODO: agents.proposal
+        Stage.PROPOSAL: lambda session, client, tender: run_proposal(session, client, tender, settings=settings, now=now,
+                                                                    force_english=force_english),
         Stage.REVIEW: None,  # TODO: agents.review
     }
 
@@ -119,7 +122,14 @@ def resume_status(session: Session, tender: Tender) -> TenderStatus:
     match = session.scalar(select(Match).where(Match.tender_id == tender.id))
     if match is None:
         return S.EXTRACTED
-    return S.MATCHED if match.decision == MatchDecision.PURSUE.value else S.EXTRACTED
+    if match.decision != MatchDecision.PURSUE.value:
+        return S.EXTRACTED
+    # A failing Compliance drops its items, so stored items mean Compliance completed (e.g. Proposal failed after).
+    report = load_report(session, tender.id)
+    if report is None:
+        return S.MATCHED
+    blocked = report.is_blocked and not override_covers(latest_override(session, tender.id), report)
+    return S.BLOCKED if blocked else S.CHECKED
 
 
 def _reach(session: Session, tender: Tender) -> TenderStatus:
@@ -271,8 +281,14 @@ def _execute(factory: sessionmaker[Session], client: LLMClient, run_id: int, run
                 # and a crash rolls it back.
                 tender.status = step.from_status.value
             started = time.perf_counter()
+
+            def on_progress(progress, stage_run=stage_run):  # Proposal: section-by-section, polled via GET /runs/{id}
+                stage_run.progress = progress
+                _save_run(factory, run_id, stages)
+
             try:
-                runners[step.stage](session, client, tender)
+                with stage_progress_context(on_progress):
+                    runners[step.stage](session, client, tender)
             except Exception as exc:
                 session.rollback()
                 stage_run.error = f"{type(exc).__name__}: {exc}"

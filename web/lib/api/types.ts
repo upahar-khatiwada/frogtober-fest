@@ -125,9 +125,33 @@ export interface paths {
         put?: never;
         /**
          * Generate Proposal
-         * @description Run Proposal and Review. Refused (409) while hard compliance failures are not overridden.
+         * @description Draft a new proposal version in the background (Review is not built yet, so the run ends at `drafted`).
+         *
+         *     Refused (409) while hard compliance failures are not overridden. Poll GET /runs/{id}: the Proposal stage
+         *     carries section-by-section `progress`. Every run stores a new version (GET /tenders/{id}/proposals); a drafted
+         *     or reviewed tender is drafted again from its compliance result.
          */
         post: operations["generate_proposal_tenders__tender_id__proposal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenders/{tender_id}/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tender Proposals
+         * @description Every stored proposal version of a tender, newest first.
+         */
+        get: operations["list_tender_proposals_tenders__tender_id__proposals_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -173,6 +197,26 @@ export interface paths {
          * @description Upload document; parse, chunk and embed it in the background. Poll GET /company/documents.
          */
         post: operations["upload_company_document_company_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Proposal
+         * @description One proposal version: sections with their cited chunk ids, grounding and flags.
+         */
+        get: operations["get_proposal_proposals__proposal_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -251,6 +295,43 @@ export interface paths {
          * @description Run status for polling (the UI polls every 2 s, spec section 9.2): stages with durations, plus its agent_runs.
          */
         get: operations["get_run_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rules
+         * @description The deterministic Nepal rules (nepal/rules.yaml): description, severity, source URL, verified flag.
+         */
+        get: operations["list_rules_rules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Chunks */
+        get: operations["get_chunks_chunks_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -353,6 +434,19 @@ export interface components {
             fiscal_year_bs: string;
             /** Amount Npr */
             amount_npr: number;
+        };
+        /** AppliesTo */
+        AppliesTo: {
+            /**
+             * Procurement Types
+             * @default []
+             */
+            procurement_types: components["schemas"]["ProcurementType"][];
+            /**
+             * Methods
+             * @default []
+             */
+            methods: components["schemas"]["ProcurementMethod"][];
         };
         /** BidSecurity */
         BidSecurity: {
@@ -797,6 +891,29 @@ export interface components {
             notes?: string | null;
         };
         /**
+         * KBChunkView
+         * @description One knowledge-base chunk with its document, so the UI can show evidence next to a compliance item.
+         */
+        KBChunkView: {
+            /** Chunk Id */
+            chunk_id: number;
+            /** Document Id */
+            document_id: number;
+            /** Filename */
+            filename: string;
+            doc_type: components["schemas"]["DocType"];
+            /** Chunk Index */
+            chunk_index: number;
+            /** Content */
+            content: string;
+            /** Expires On */
+            expires_on?: string | null;
+            /** Is Expired */
+            is_expired?: boolean | null;
+            /** Fiscal Year Bs */
+            fiscal_year_bs?: string | null;
+        };
+        /**
          * MatchDecision
          * @enum {string}
          */
@@ -944,6 +1061,15 @@ export interface components {
          * @enum {string}
          */
         ProcurementType: "goods" | "works" | "consulting" | "non_consulting" | "unknown";
+        /** ProgressItem */
+        ProgressItem: {
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /** @default pending */
+            status: components["schemas"]["SectionProgress"];
+        };
         /**
          * Proposal
          * @description A stored proposal version (`proposals` table, spec section 11).
@@ -955,6 +1081,7 @@ export interface components {
             tender_id: number;
             /** Version */
             version: number;
+            language: components["schemas"]["ProposalLanguage"];
             /** Sections */
             sections: components["schemas"]["ProposalSection"][];
             review?: components["schemas"]["ReviewReport"] | null;
@@ -962,27 +1089,99 @@ export interface components {
             status: components["schemas"]["ProposalStatus"];
             /** Approved At */
             approved_at?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Citation Rate
+             * @description Share of sections with at least one valid KB citation.
+             */
+            citation_rate: number;
         };
-        /** ProposalSection */
+        /**
+         * ProposalLanguage
+         * @description Language a proposal is written in: the notice's language (`mixed` -> ne) unless English is forced.
+         * @enum {string}
+         */
+        ProposalLanguage: "en" | "ne";
+        /**
+         * ProposalRequest
+         * @description POST /tenders/{id}/proposal body (optional).
+         */
+        ProposalRequest: {
+            /**
+             * Force English
+             * @description Write in English whatever the notice language. Default: the PROPOSAL_FORCE_ENGLISH setting.
+             */
+            force_english?: boolean | null;
+        };
+        /**
+         * ProposalSection
+         * @description A stored section (built by code from the draft).
+         */
         ProposalSection: {
+            /**
+             * Key
+             * @description Template key, e.g. relevant_experience.
+             */
+            key: string;
             /** Title */
             title: string;
             /**
              * Body
-             * @description Section text (Markdown).
+             * @description Rendered text (Markdown) with placeholders resolved.
              */
             body: string;
             /**
-             * Cited Chunk Ids
-             * @description kb_chunks.id values the text is grounded in.
+             * Body Template
+             * @description The model's text with placeholders, before resolution.
+             * @default
              */
-            cited_chunk_ids: number[];
+            body_template: string;
+            /**
+             * Cited Chunk Ids
+             * @description Valid kb_chunks.id values the text cites.
+             */
+            cited_chunk_ids?: number[];
+            /**
+             * Grounded
+             * @description At least one valid KB citation.
+             */
+            grounded: boolean;
+            /** Flags */
+            flags?: components["schemas"]["SectionFlag"][];
+            /**
+             * Requirement Indices
+             * @description TenderRecord.requirements this section answers.
+             */
+            requirement_indices?: number[];
+            /** Placeholders */
+            placeholders?: components["schemas"]["ResolvedPlaceholder"][];
         };
         /**
          * ProposalStatus
          * @enum {string}
          */
         ProposalStatus: "draft" | "reviewed" | "approved";
+        /**
+         * ProposalSummary
+         * @description Latest proposal version on the tender detail page.
+         */
+        ProposalSummary: {
+            /** Id */
+            id: number;
+            /** Version */
+            version: number;
+            language: components["schemas"]["ProposalLanguage"];
+            status: components["schemas"]["ProposalStatus"];
+            /** Created At */
+            created_at?: string | null;
+            /** Sections Total */
+            sections_total: number;
+            /** Sections Grounded */
+            sections_grounded: number;
+            /** Sections Flagged */
+            sections_flagged: number;
+        };
         /**
          * Province
          * @enum {string}
@@ -1030,6 +1229,21 @@ export interface components {
          * @enum {string}
          */
         RequirementCategory: "eligibility" | "financial" | "experience" | "technical" | "personnel" | "equipment" | "other";
+        /** ResolvedPlaceholder */
+        ResolvedPlaceholder: {
+            /** Name */
+            name: string;
+            /**
+             * Value
+             * @description Inserted text; null when the value is not on record.
+             */
+            value: string | null;
+            /**
+             * Source
+             * @description "company", "tender", "clock" or "chunk <id>".
+             */
+            source: string;
+        };
         /**
          * ReviewFlag
          * @description A field code could not confirm. The raw string is kept; the value is left null rather than guessed.
@@ -1076,6 +1290,36 @@ export interface components {
          * @enum {string}
          */
         ReviewVerdict: "pass" | "fail";
+        /** Rule */
+        Rule: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /**
+             * @default {
+             *       "procurement_types": [],
+             *       "methods": []
+             *     }
+             */
+            applies_to: components["schemas"]["AppliesTo"];
+            /** Check */
+            check: string;
+            /**
+             * Parameters
+             * @default {}
+             */
+            parameters: {
+                [key: string]: unknown;
+            };
+            severity: components["schemas"]["Severity"];
+            /** Source */
+            source: string;
+            /** Verified */
+            verified: boolean;
+            /** Notes */
+            notes?: string | null;
+        };
         /**
          * RunStatus
          * @description A pipeline run (`pipeline_runs`, GET /runs): one orchestrated pass over one tender.
@@ -1127,6 +1371,24 @@ export interface components {
              */
             max_notices: number;
         };
+        /** SectionFlag */
+        SectionFlag: {
+            kind: components["schemas"]["SectionFlagKind"];
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * SectionFlagKind
+         * @description Why a proposal section needs a person's attention. JSONB only, so no CHECK constraint.
+         * @enum {string}
+         */
+        SectionFlagKind: "no_kb_material" | "ungrounded" | "unknown_citation" | "unsourced_figure" | "missing_value" | "unknown_placeholder" | "fact_not_verbatim" | "gaps_reported";
+        /**
+         * SectionProgress
+         * @description Per-section progress of a running Proposal stage (`StageRun.progress`).
+         * @enum {string}
+         */
+        SectionProgress: "pending" | "running" | "ok" | "flagged" | "failed";
         /**
          * SecurityCalc
          * @description A security amount computed by `nepal.rules` from the notice's own figures.
@@ -1165,6 +1427,23 @@ export interface components {
          */
         Stage: "scout" | "matching" | "compliance" | "proposal" | "review";
         /**
+         * StageProgress
+         * @description Item-by-item progress inside a running stage (Proposal: one item per section).
+         */
+        StageProgress: {
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /**
+             * Current
+             * @description Title of the item being worked on.
+             */
+            current?: string | null;
+            /** Items */
+            items?: components["schemas"]["ProgressItem"][];
+        };
+        /**
          * StageRun
          * @description One stage of a pipeline run, as stored in `pipeline_runs.stages`.
          */
@@ -1182,6 +1461,7 @@ export interface components {
             duration_ms?: number | null;
             /** Error */
             error?: string | null;
+            progress?: components["schemas"]["StageProgress"] | null;
         };
         /**
          * StageStatus
@@ -1217,6 +1497,8 @@ export interface components {
             match?: components["schemas"]["MatchResult"] | null;
             /** @description Null until Compliance has run. */
             compliance?: components["schemas"]["ComplianceView"] | null;
+            /** @description Newest proposal version; null until Proposal has run. */
+            latest_proposal?: components["schemas"]["ProposalSummary"] | null;
         };
         /**
          * TenderListItem
@@ -1615,15 +1897,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ProposalRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Proposal"];
+                    "application/json": components["schemas"]["PipelineRunView"];
                 };
             };
             /** @description No such tender */
@@ -1633,7 +1919,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Blocked by hard compliance failures (no override), or not checked */
+            /** @description Blocked by hard compliance failures (no override), not checked, or a run is already active */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1649,12 +1935,43 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Not implemented yet */
-            501: {
+        };
+    };
+    list_tender_proposals_tenders__tender_id__proposals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tender_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Proposal"][];
+                };
+            };
+            /** @description No such tender */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -1776,6 +2093,44 @@ export interface operations {
             };
             /** @description Unsupported Media Type */
             415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_proposal_proposals__proposal_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Proposal"];
+                };
+            };
+            /** @description No such proposal */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1921,6 +2276,58 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_rules_rules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Rule"][];
+                };
+            };
+        };
+    };
+    get_chunks_chunks_get: {
+        parameters: {
+            query: {
+                /** @description kb_chunks.id values; unknown ids are omitted */
+                ids: number[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KBChunkView"][];
+                };
             };
             /** @description Validation Error */
             422: {

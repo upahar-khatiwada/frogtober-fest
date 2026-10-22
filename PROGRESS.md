@@ -231,6 +231,61 @@
 - **README.md "All commands"** (follow-up, same day): every runnable command grouped as setup, Docker, host run (with bash + PowerShell env vars and host URLs), demo data, hand-run API flow (filters, analyze, runs, override, proposal gate, company + upload `curl`s), agent CLIs and metrics, tests, maintenance. Each command is tagged with what it needs (offline / API / DB / Ollama). The CLI flags were checked against each script's argparse, and `score_matching` / `score_compliance` were re-run offline (unchanged numbers).
 - **Verified in the dev server** (`NEXT_PUBLIC_USE_MOCKS=1 bun run dev`): `/`, `/?procurement_type=goods` (1 row), `/company`, `/runs` all 200; server HTML contains the Devanagari title and BS dates (`१९ कात्तिक २०८३`, `19 Kartik 2083 BS`) intact; the served CSS has the Noto Sans Devanagari `@font-face` with `unicode-range: U+900-97F … U+200C-200D` (ZWNJ/ZWJ for conjuncts). Without mocks and with no backend, `/` shows the "could not reach the API" message and `/company` the load error. Glyph shaping itself was not inspected in a real browser (no browser here).
 
+### Prompt 9: Proposal agent: section planner, generate_section, versions, progress (2026-10-22) ✅ (offline). Real-model metric NOT run
+- Read spec §8.1, §8.2 and §10.4 this session, from the PDF. The section plan was proposed in plan mode before any code was written. Two calls were made by the user: `mixed` notices → Nepali proposals, and figures the model writes itself are **masked + flagged**.
+- **`agents/proposal.py`:**
+  - **Planner (`plan_sections`, code):**
+    - goods/works/non-consulting/unknown: cover letter, bidder info + eligibility, technical specification compliance, delivery schedule (goods) or work plan, relevant experience, financial capacity, declarations;
+    - consulting RFP: cover letter, understanding of the ToR, methodology, work plan, team, relevant experience;
+    - consulting EOI is reordered to experience first and drops the methodology.
+    - Requirements route by category to one section each and add sections the template lacks (team, key equipment, bidder info, financial capacity; declarations when the notice lists a self-declaration). The rationale is in NEPAL_CONTEXT §15.
+  - **`generate_section`:** per-section retrieval (topic + routed requirement texts + scope; `PROPOSAL_TOP_K`=5; `PROPOSAL_MIN_SIMILARITY`=0). No chunk → no model call and a stub flagged `no_kb_material`. Otherwise one `ProposalSectionDraft` (body with placeholders, `cited_chunk_ids`, verbatim `facts`, `missing`) at temperature 0.4.
+  - **`build_section` (pure code):**
+    - drops citations that were not shown;
+    - checks facts verbatim with `Grounder` and inserts the KB's own text;
+    - resolves 24 placeholders (`company.*`, `tender.*`, `today`) from the records. A null value becomes `[MISSING: …]`;
+    - masks amounts, lakh/crore phrases, ids with digits and 4+ digit figures the model typed itself (`⟦unsourced: …⟧`);
+    - flags the section (`SectionFlagKind`: no_kb_material, ungrounded, unknown_citation, unsourced_figure, missing_value, unknown_placeholder, fact_not_verbatim, gaps_reported).
+  - **Language and dates:** `proposal_language` gives en → en and ne/mixed → ne, unless `PROPOSAL_FORCE_ENGLISH` or the request forces English. Dates show BS + AD when the notice wrote a BS date (`uses_bs`), and money uses lakh/crore grouping (Devanagari digits in Nepali).
+  - **`run_proposal`:**
+    - runs only on a `checked` tender that passes `proposal_allowed`;
+    - stores a **new `proposals` version** (version = max+1, `language`, sections JSON with `cited_chunk_ids`, flags and resolved placeholders; older versions are kept);
+    - writes one `deterministic` agent_runs row (plan, flags, `citation_rate`) plus one row per section call, and sets `drafted`;
+    - on an LLM or embedding error, sets `failed` and stores no partial version.
+- **Schemas:** new `ProposalSectionDraft` (what the LLM fills), `SectionFact`, `SectionFlag`, `ResolvedPlaceholder`, `ProposalSummary`, `ProposalRequest`, `StageProgress` / `ProgressItem`, and enums `ProposalLanguage`, `SectionFlagKind`, `SectionProgress`. `ProposalSection` is now code-built (`key, title, body, body_template, cited_chunk_ids` (may be empty), `grounded, flags, requirement_indices, placeholders`). `Proposal` gained `language`, `created_at`, `citation_rate`. `StageRun` gained `progress`, and `TenderDetail` gained `latest_proposal`.
+- **DB (migration `0004`):** `proposals.language` with CHECK (en, ne).
+- **Orchestrator:**
+  - `default_runners[PROPOSAL] = run_proposal` (with `force_english=`);
+  - `resume_status`: a failed tender with stored compliance items that do not block (or an active override) resumes at **checked**, so a failed Proposal re-runs only Proposal;
+  - section-by-section progress: `db.runs.report_progress` → `stage_progress_context` callback → `StageRun.progress` saved on the run (it also bumps the heartbeat).
+- **API:**
+  - `POST /tenders/{id}/proposal` (optional `ProposalRequest {force_english}`) is now **202 + `PipelineRunView`** (target `drafted`; `from_stage=proposal` re-drafts a drafted/reviewed tender). It is gated by `can_draft` (= `proposal_allowed`, or a failed tender whose last good state is checked).
+  - New `GET /tenders/{id}/proposals` (versions, newest first) and `GET /proposals/{id}`. `GET /tenders/{id}` has `latest_proposal`.
+- **Web:** `lib/api/types.ts` regenerated (`bun run gen:api`). `generateProposal` returns the run (optional `forceEnglish`), and the tender page polls it like an analyze run. The "proposal done" label now says drafting started (en + ne). `bunx tsc --noEmit` and lint are clean; vitest gives 77 passed. No proposal page/editor yet.
+- **Metric script:** `scripts/score_proposal.py` (citation rate = sections with ≥1 valid KB citation; per section key, per tender, flag histogram). The default prints the section plans offline. `--llm` drafts the 7 golden pursued seeds + 009 (EOI) + 010 (RFP) over an in-memory demo KB, and `--db` scores stored proposals.
+- **Citation metric: NOT measured with a model.** There is no Ollama on this machine today (`curl localhost:11434` refused; Docker Desktop not running). Offline evidence only:
+  - the fake-model tests reach 1.0 when every draft cites a shown chunk, and 0.0 when none does (each section flagged `ungrounded`);
+  - with an empty or below-threshold KB, every section is a `no_kb_material` stub with no model call.
+  - Run `uv run python -m api.scripts.score_proposal --llm --out ../data/golden/proposal_report.json` and record the number here (issue 66).
+- **Offline section plans (default mode):** 001: 9 sections (+team, +key_equipment); 002: 8 (+key_equipment); 015/016/019/027/029: 7; 009 EOI: 4; 010 RFP: 6. Nepali for 001/015/016/027/029/010 (ne or mixed); BS+AD dates on all 9.
+- **Tests:** `uv run pytest -q` gives **650 passed, 4 deselected** (was 605 + 43 new = 648 before the metric tests).
+  - `test_proposal.py` (42):
+    - every template and the EOI reorder;
+    - routing and added sections;
+    - query = topic + requirement;
+    - language incl. force;
+    - BS/AD detection and formatting;
+    - **placeholders resolve** (company/tender values and sources, Nepali digits, missing → marker + one flag, unknown name, verbatim fact inserts the KB text and counts as a citation, non-verbatim or unshown fact);
+    - **9 invented-figure cases masked**, small counts untouched;
+    - **ungrounded flagged** (unknown citation, empty citations, gaps);
+    - no chunk → no model call;
+    - one call at 0.4 with the schema and the Nepali instruction; the prompt withholds values;
+    - invalid twice → `LLMOutputError`;
+    - DB: **versions 1 and 2 both kept** (ne then forced en), drafted, agent_runs rows; ungrounded stored + flagged; similarity floor; gate refusals; model failure → failed, no row, **resume at Proposal only**; progress monotonic to done == total;
+    - API: 409 blocked → override → 202 → run with progress → re-draft → versions/detail/404/422;
+    - metric arithmetic and offline CLI.
+  - Updated: `test_compliance_api` (proposal 501 → 202 run ending `drafted`), `test_orchestrator` / `test_tenders_list_api` (the "not implemented" target is now `reviewed`), `test_schemas` (draft vs stored section).
+
 ## Decisions
 - **Embedding model: `bge-m3` (1024-dim)**, per the hard rule in the Prompt 0 instructions. `kb_chunks.embedding VECTOR(1024)` is now fixed (spec §11).
 - **Tender facts come from the notice, not from the law.** Bid security, validity, deadline and required documents are extracted per tender. Statutory amounts in NEPAL_CONTEXT.md are context only, because the English Rules text available is from 2008 and is outdated.
@@ -317,6 +372,14 @@
 - **Generate proposal is never silently enabled.** It needs `proposal_allowed`; an override is a separate, explicit dialog (who, why, which failures) that then triggers generation.
 - **Needs-review is derived on the client** from `review_flags` + `sources` (a "deadline" flag covers `deadline_ad` and `deadline_bs_iso`); no backend change.
 
+- **Proposal: the LLM writes prose, code writes every fact (Prompt 9).** Identifiers, amounts, dates and project names reach the document only through placeholders resolved from the company/tender record or a verbatim KB quote. A figure typed by the model is masked and flagged, not retried (user's call). It is a visible, reviewable defect, not invalid JSON, and retrying would fail stages for prose slips.
+- **`ProposalSection.cited_chunk_ids` may be empty.** The `min_length=1` moved from the schema to the grounding check, so an ungrounded section is stored with `grounded=false` + a flag instead of failing the stage or being filled with an invented citation (spec §8.2: flagged, by Review later).
+- **No chunk → no model call.** A section with no retrieved KB material is a code stub, so the model cannot write it from general knowledge. `PROPOSAL_MIN_SIMILARITY` (default 0, i.e. off) makes "no material" reachable with real embeddings once tuned.
+- **`mixed` notices get Nepali proposals** (user's call); `PROPOSAL_FORCE_ENGLISH` / `force_english` switch to English.
+- **Templates in code, not a DB table**, ordered per family. "Add/reorder" is deterministic: requirement categories add sections, EOI reorders. The SBD forms themselves are not generated (NEPAL_CONTEXT §15).
+- **Every Proposal run is a new version;** none is overwritten or deleted. The orchestrator rewinds a drafted/reviewed tender to checked and re-drafts (`from_stage=proposal`).
+- **Progress through the run, not a new table:** `StageRun.progress` in the existing `pipeline_runs.stages` JSONB, published via a ContextVar callback so agents stay orchestrator-agnostic.
+
 ## Deviations from spec
 - §11 `tenders.budget` is named `estimated_cost_npr` (same meaning, integer NPR). Timestamps are `TIMESTAMPTZ`, not `TIMESTAMP` (NPT matters). `matches` has a serial `id` (spec has no PK). `agent_runs.tender_id` has no FK, as in the spec, because Scout runs before the tender row exists.
 - `DocType.company_profile` added (capability statement; NEPAL_CONTEXT §11 updated).
@@ -336,6 +399,7 @@
 - §11: a new `pipeline_runs` table; `agent_runs` gains `pipeline_run_id` (FK) and `cached`.
 - §9.1 (frontend prompt): `/runs` is a placeholder and `/tenders/[id]` and `/tenders/[id]/proposal` do not exist yet. Dashboard rows show reasons and hard-failure counts but do not link anywhere.
 - §9.1 `/tenders/[id]` exists. `/tenders/[id]/proposal` and the real `/runs` page do not yet. §10.2: two read-only additions, `GET /rules` and `GET /chunks`.
+- §10.2 (Prompt 9): `POST /tenders/{id}/proposal` returns 202 + a pipeline run (not a `Proposal`) and runs Proposal only. Review is not built, so the run stops at `drafted`. New read routes: `GET /tenders/{id}/proposals`, `GET /proposals/{id}`. §8.1: the LLM fills `ProposalSectionDraft`; code builds `ProposalSection`. §11: `proposals.language`.
 
 ## Open issues
 `[VERIFY]` items in `docs/NEPAL_CONTEXT.md` §10 (unchanged from Prompt 0):
@@ -412,9 +476,8 @@ New (Prompt 8):
 51. Replay keys include the prompts, and prompts cite KB chunk ids. Re-seeding a non-fresh DB (`seed_demo` deletes and re-inserts documents, so ids grow) makes Matching/Compliance miss, which means live model calls. `--check` detects this. A content-addressed chunk citation would remove the coupling, but that is a prompt and contract change.
 52. The reaper's stale threshold (600 s) assumes a stage makes progress at least every 2×`LLM_TIMEOUT_S`. A Compliance stage with many requirements bumps the heartbeat per call, so it is fine. A worker that is still alive but past the threshold is marked failed, yet still writes its real outcome when it finishes.
 53. Background tasks share the process with the API. With several uvicorn workers, the startup reaper of one worker would fail another worker's live runs. Run a single worker (the Docker CMD does today), or reap by age only.
-54. Proposal/Review runners are `None`. When those agents land:
-    - extend `resume_status` (a proposals row means `checked` was completed);
-    - wire them in `default_runners`;
+54. Review runner is `None` (Proposal landed in Prompt 9: wired, `resume_status` extended). When Review lands:
+    - wire it in `default_runners`;
     - implement "review fail → one revision pass" (spec §10.3);
     - `POST /proposals/{id}/approve` is the human `reviewed→approved` edge.
 55. No UI yet for the Runs page / polling (spec Day 6, member C). The API is ready: `GET /runs`, `GET /runs/{id}`, and analyze returns the run id. (Frontend prompt: `/runs` is a placeholder page only.)
@@ -429,9 +492,18 @@ New (frontend prompt):
 62. A frontend BS date outside BS 2000–2099 falls back to AD display; the BS input rejects it.
 63. `/rules` and `/chunks` types are hand-written in `lib/api/tenderly.ts`; re-run `bun run gen:api` and switch to the generated types.
 64. Nothing has run against a live API or in a real browser (matrix colours, dialog focus, Nepali rendering). Tender-detail Nepali labels are model-written `[VERIFY]` (issue 60).
-65. After an override the page re-reads the tender and calls the proposal route, which is still a 501 stub, so "Generate proposal" cannot yet succeed end to end.
+65. ~~After an override the page calls a 501 stub~~: Prompt 9 made the route real (202 + run, polled by the page). There is still no page that shows the drafted sections.
+
+New (Prompt 9):
+66. **The citation metric has never run against a real model.** With Ollama up: `cd api && uv run python -m api.scripts.score_proposal --llm --out ../data/golden/proposal_report.json` (and `--force-english` for comparison), then record the rate, per-section rates and flag counts here. Expect `financial_capacity`, `team` and `key_equipment` to be the weakest: the demo KB has no audit reports, CVs or equipment list beyond the company profile PDF. Also check whether Qwen 7B follows the placeholder/fact contract or types figures (watch the `unsourced_figure` count).
+67. `PROPOSAL_MIN_SIMILARITY` is 0 (off), so with any ready document every section gets top-k chunks and the model decides relevance. Tune it on real bge-m3 similarities; until then `no_kb_material` only fires on an empty KB.
+68. Nepali section titles, the Nepali stub text, `mixed` → Nepali, and the BS/AD date format in Nepali were model-written `[VERIFY]` with a native reader (issue 60).
+69. No proposal page/editor (`/tenders/[id]/proposal`, spec §9.1) yet: the API has versions, sections, flags and placeholders ready. The UI should show `flags` per section, highlight `⟦unsourced⟧` / `[MISSING]` markers, and link `cited_chunk_ids` via `GET /chunks`.
+70. Review (spec §10.3: verdict, one revision pass on fail) and `POST /proposals/{id}/approve` remain (issue 54). Review should read `ProposalSection.flags` and `grounded`.
+71. Placeholders use the **first** licence and JV partner in the profile, and `company.turnover_average` uses the profile's latest 3 FYs (as Matching does), not the notice's look-back. Enough for the demo company; multi-licence firms need named placeholders.
+72. The replay cache (`precache_demo`) does not record Proposal yet. Extend it to `target=drafted` once the prompts settle (issue 50).
 
 Other:
 - The spec's AI-disclosure table (§15.1) is garbled in the PDF text extraction. Function names will be finalised from real code.
 
-run the web app against the live API once (57, 58, 64), then the real /runs log (55), then the Proposal agent behind proposal_allowed and /tenders/[id]/proposal. Keep the Prompt 9 backend text as the parallel backend track.
+With Ollama up: measure the proposal citation rate (`score_proposal --llm`, issue 66) and the outstanding Scout/Matching/Compliance numbers (35, 40, 44). Then the Review agent (`agents/review.py`: `ReviewReport` at temp 0 over sections + requirements, reading `ProposalSection.flags`/`grounded`; verdict fail → one revision pass; `POST /proposals/{id}/approve` as the human `reviewed → approved` edge, issue 54/70), and on the frontend the `/tenders/[id]/proposal` page showing versions, per-section flags and citations (issue 69).

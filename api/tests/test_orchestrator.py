@@ -320,7 +320,7 @@ def test_from_stage_rewinds_and_validates(session_factory, db_session, make_clie
     with pytest.raises(ValueError, match="human"):
         plan_run(db_session, tender, target=S.APPROVED, runners=runners)
     with pytest.raises(ValueError, match="not implemented"):
-        plan_run(db_session, tender, target=S.DRAFTED, runners=orch.default_runners())
+        plan_run(db_session, tender, target=S.REVIEWED, runners=orch.default_runners())  # no Review agent yet
     with pytest.raises(ValueError, match="already extracted"):
         plan_run(db_session, add_tender(db_session, record(), url="seed://e"), target=S.EXTRACTED, runners=runners)
 

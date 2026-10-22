@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import Field
 
 from schemas._base import Contract
-from schemas.enums import RunStatus, Stage, StageStatus, TenderStatus
+from schemas.enums import RunStatus, SectionProgress, Stage, StageStatus, TenderStatus
 
 
 class AgentRunRecord(Contract):
@@ -37,6 +37,21 @@ class AgentRun(AgentRunRecord):
     created_at: datetime
 
 
+class ProgressItem(Contract):
+    key: str
+    title: str
+    status: SectionProgress = SectionProgress.PENDING
+
+
+class StageProgress(Contract):
+    """Item-by-item progress inside a running stage (Proposal: one item per section)."""
+
+    done: int = Field(ge=0)
+    total: int = Field(ge=0)
+    current: str | None = Field(None, description="Title of the item being worked on.")
+    items: list[ProgressItem] = Field(default_factory=list)
+
+
 class StageRun(Contract):
     """One stage of a pipeline run, as stored in `pipeline_runs.stages`."""
 
@@ -48,6 +63,7 @@ class StageRun(Contract):
     finished_at: datetime | None = None
     duration_ms: int | None = Field(None, ge=0)
     error: str | None = None
+    progress: StageProgress | None = None
 
 
 class AnalyzeRequest(Contract):

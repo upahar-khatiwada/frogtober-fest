@@ -6,6 +6,7 @@ from pipeline.llm import LLMClient
 from tests.conftest import FakeOllama, bag_of_words_vector
 from tests.test_compliance import demo_tender, seed_demo, unclear_json
 from tests.test_matching import assessment_json, settings_
+from tests.test_proposal import DraftFake
 from tests.test_tenders_list_api import api  # noqa: F401  (fixture)
 
 
@@ -56,14 +57,17 @@ def test_proposal_refused_while_blocked_then_override(api, db_session, pg_url, m
     assert override["overridden_by"] == "Sita Demo Thapa" and override["active"] is True and override["overridden_at"]
     assert override["hard_failures"] == ["NP-TAX-CLEARANCE:Tax clearance for F/Y 2082/83"]
     assert body["compliance"]["blocked"] is True and body["compliance"]["proposal_allowed"] is True
-    # Gate passes; the proposal stage itself is still a stub.
-    assert api.post(f"/tenders/{tender.id}/proposal").status_code == 501
+    # Gate passes: a background Proposal run drafts it (drafting itself is tested in tests/test_proposal.py).
+    api.holder["llm"] = LLMClient(lambda _run: None, settings_(), transport=httpx.MockTransport(DraftFake().handler))
+    resp = api.post(f"/tenders/{tender.id}/proposal")
+    assert resp.status_code == 202 and api.get(f"/runs/{resp.json()['id']}").json()["end_status"] == "drafted"
     # A second override is refused: the tender is no longer blocked.
     assert api.post(f"/tenders/{tender.id}/compliance/override",
                     json={"overridden_by": "x", "reason": "y"}).status_code == 409
 
 
 def test_override_and_proposal_errors(api, db_session, pg_url, make_client):  # noqa: F811
+    api.holder["llm"] = llm([])
     assert api.post("/tenders/99999/compliance/override", json={"overridden_by": "x", "reason": "y"}).status_code == 404
     assert api.post("/tenders/99999/proposal").status_code == 404
     seed_demo(pg_url, make_client)

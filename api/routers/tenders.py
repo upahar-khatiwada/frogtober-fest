@@ -2,8 +2,8 @@
 
 Implemented: POST /tenders/scrape, GET /tenders (ranked, filtered), GET /tenders/{id} (with the
 compliance section), POST /tenders/{id}/analyze (202: a background pipeline run, polled via GET /runs/{id}) and
-POST /tenders/{id}/compliance/override. The proposal route enforces the compliance gate (409 while
-blocked) and is otherwise still a 501 stub that declares its response model for the OpenAPI schema.
+POST /tenders/{id}/compliance/override, POST /tenders/{id}/proposal (202: a background Proposal run behind the
+compliance gate, 409 while blocked) and GET /tenders/{id}/proposals (stored versions).
 """
 
 from datetime import datetime, time, timedelta
@@ -15,7 +15,8 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Qu
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from agents.compliance import compliance_view, override_block, proposal_allowed
+from agents.compliance import compliance_view, override_block
+from agents.proposal import can_draft, latest_proposal, list_proposals, proposal_from_row, summary_from_row
 from config import Settings
 from db.models import ComplianceItemRow, Match, Tender
 from deps import get_kankai_fetcher, get_llm_client, get_now, get_seed_dir, get_session, get_sessionmaker, get_settings
@@ -28,13 +29,10 @@ from pipeline import orchestrator
 from pipeline.llm import LLMClient
 from routers.runs import run_view
 from schemas import (AnalyzeRequest, BuyerLevel, ComplianceOverrideRequest, DeadlineView, MatchDecision, MatchResult, NoticeLanguage, PipelineRunView, ProcurementMethod, ProcurementType,
-                     Proposal, Province, ScrapeReport, ScrapeRequest, SkippedNotice, TenderDetail, TenderListItem,
-                     TenderRecord, TenderSource, TenderStatus)
+                     Proposal, ProposalRequest, Province, ScrapeReport, ScrapeRequest, SkippedNotice, Stage, TenderDetail,
+                     TenderListItem, TenderRecord, TenderSource, TenderStatus)
 
 router = APIRouter(prefix="/tenders", tags=["tenders"])
-
-_NOT_IMPLEMENTED = "Not implemented yet - see PROGRESS.md Next prompt."
-_501 = {status.HTTP_501_NOT_IMPLEMENTED: {"description": "Not implemented yet"}}
 
 E = TypeVar("E", bound=StrEnum)
 
@@ -106,6 +104,7 @@ def _detail(session: Session, tender: Tender, match: Match | None, now: datetime
         record=TenderRecord.model_validate(tender.record_json) if tender.record_json else None,
         match=MatchResult.model_validate(match.reasons) if match else None,
         compliance=compliance_view(session, tender.id),
+        latest_proposal=summary_from_row(row) if (row := latest_proposal(session, tender.id)) else None,
     )
 
 
@@ -268,15 +267,48 @@ def override_compliance(
 
 @router.post(
     "/{tender_id}/proposal",
-    responses={**_501, status.HTTP_404_NOT_FOUND: {"description": "No such tender"},
-               status.HTTP_409_CONFLICT: {"description": "Blocked by hard compliance failures (no override), or not checked"}},
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={status.HTTP_404_NOT_FOUND: {"description": "No such tender"},
+               status.HTTP_409_CONFLICT: {"description": "Blocked by hard compliance failures (no override), not checked, "
+                                                         "or a run is already active"}},
 )
-def generate_proposal(tender_id: int, session: Annotated[Session, Depends(get_session)]) -> Proposal:
-    """Run Proposal and Review. Refused (409) while hard compliance failures are not overridden."""
+def generate_proposal(
+    tender_id: int,
+    background: BackgroundTasks,
+    session: Annotated[Session, Depends(get_session)],
+    factory: Annotated[sessionmaker[Session], Depends(get_sessionmaker)],
+    client: Annotated[LLMClient, Depends(get_llm_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    now: Annotated[datetime, Depends(get_now)],
+    body: Annotated[ProposalRequest | None, Body()] = None,
+) -> PipelineRunView:
+    """Draft a new proposal version in the background (Review is not built yet, so the run ends at `drafted`).
+
+    Refused (409) while hard compliance failures are not overridden. Poll GET /runs/{id}: the Proposal stage
+    carries section-by-section `progress`. Every run stores a new version (GET /tenders/{id}/proposals); a drafted
+    or reviewed tender is drafted again from its compliance result.
+    """
+    body = body or ProposalRequest()
     tender = session.get(Tender, tender_id)
     if tender is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No tender {tender_id}")
-    allowed, why = proposal_allowed(session, tender)
+    allowed, why = can_draft(session, tender)
     if not allowed:
         raise HTTPException(status.HTTP_409_CONFLICT, why.replace("{id}", str(tender_id)))
-    raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, _NOT_IMPLEMENTED)
+    runners = orchestrator.default_runners(settings, now, force_english=body.force_english)
+    redo = tender.status in (TenderStatus.DRAFTED.value, TenderStatus.REVIEWED.value)
+    try:
+        run = orchestrator.start_run(session, tender, target=TenderStatus.DRAFTED,
+                                     from_stage=Stage.PROPOSAL if redo else None, runners=runners)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    background.add_task(orchestrator.execute_run, factory, client, run.id, settings=settings, now=now, runners=runners)
+    return run_view(run, tender.title)
+
+
+@router.get("/{tender_id}/proposals", responses={status.HTTP_404_NOT_FOUND: {"description": "No such tender"}})
+def list_tender_proposals(tender_id: int, session: Annotated[Session, Depends(get_session)]) -> list[Proposal]:
+    """Every stored proposal version of a tender, newest first."""
+    if session.get(Tender, tender_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No tender {tender_id}")
+    return [proposal_from_row(row) for row in list_proposals(session, tender_id)]

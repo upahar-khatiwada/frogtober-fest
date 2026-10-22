@@ -10,6 +10,7 @@ from schemas.compliance import ComplianceView
 from schemas.enums import (BuyerLevel, DocType, IngestStatus, MatchDecision, NoticeLanguage, ProcurementMethod,
                            ProcurementType, Province, TenderSource, TenderStatus)
 from schemas.match import MatchResult
+from schemas.proposal import ProposalSummary
 from schemas.tender import TenderRecord
 
 
@@ -34,6 +35,7 @@ class TenderDetail(Contract):
     record: TenderRecord | None = None
     match: MatchResult | None = None
     compliance: ComplianceView | None = Field(None, description="Null until Compliance has run.")
+    latest_proposal: ProposalSummary | None = Field(None, description="Newest proposal version; null until Proposal has run.")
 
 
 class TenderListItem(Contract):

@@ -308,3 +308,28 @@ Matching (`api/agents/matching.py`) uses **no procurement-law threshold**. Every
 - A missing value (no district, no cost, no confirmed deadline) costs points but never skips. Scout leaves values null rather than guessing (§13), so the tender stays visible for a human.
 - **Deadline display (GET /tenders):** `DeadlineView` gives the AD datetime in NPT, the BS date from the lookup table (`ad_to_bs`, §7), `"5 Mangsir 2083"` and `"५ मंसिर २०८३"` forms, and `days_left` (calendar days between NPT dates; negative once passed). `deadline_within_days=N` means not passed and at most N NPT calendar days away.
 - The `district` filter accepts English, Nepali or a common spelling and normalises with `normalize_location` (`तनहुँ` → Tanahun).
+
+## 15. Proposal conventions (as implemented, Proposal prompt)
+
+The Proposal agent (`api/agents/proposal.py`) writes the bidder's narrative sections. It does **not** fill the PPMO standard bidding document (SBD) forms (bid form, price schedule, BOQ). Those stay as the notice's own forms, which the person signs. Section templates live in code, so the structure is deterministic and testable.
+
+**Templates and why:**
+
+| Family | Sections (in order) | Why this structure |
+|---|---|---|
+| Goods, works, non-consulting, unknown | cover letter; bidder information and eligibility; technical specification compliance; delivery schedule (goods) / work plan (works); relevant experience; financial capacity; declarations | These are evaluated as the "lowest evaluated substantially responsive" bid (PPA §25, §2.3). A bid is first checked for **responsiveness and qualification**, and only then on price. So the narrative follows the qualification evidence: eligibility documents (PPR-EN Rule 40(2), §3), conformity with specifications, ability to deliver, similar experience and financial criteria (Rule 28(3) list, §3), and the self-declaration (Rule 40(2)(e)). |
+| Consulting, RFP | cover letter; understanding of the ToR; methodology; work plan; team; relevant experience | QCBS technical scoring weights methodology 20–50%, key personnel 30–60% and firm experience up to 10% (PPR-EN Rule 71(6), §2.3 `[VERIFY]` against current amendments). The sections map one-to-one onto what is scored. |
+| Consulting, EOI | cover letter; relevant experience; team; understanding of the ToR | An EOI builds a **short list** (Rule 70, §2.1) mostly on experience and capacity, and there is no methodology yet. So experience comes first and methodology is left out. |
+
+**Tender-specific additions (code, from Scout's `requirements[]` categories):** an eligibility requirement adds *bidder information*, a financial one *financial capacity*, personnel adds *team*, and equipment adds *key equipment* (works). A notice that lists a self-declaration or power of attorney adds *declarations* (also for consulting). Each requirement is answered in exactly one section, and its text joins that section's retrieval query (spec §10.4).
+
+**Values the model never writes:**
+- PAN/VAT numbers, registration, licence and certificate numbers, amounts, dates and project names come only from the company record, the tender record, or a verbatim KB quote. Code inserts them through placeholders (`{{company.pan}}`, `{{tender.deadline}}`, `{{fact.<key>}}`).
+- The PAN/VAT format is still not validated (§10 item 11). The value is copied as stored, never generated.
+- A figure the model typed itself (an amount, a lakh/crore phrase, an id with digits, any number of 4+ digits including BS years) is masked `⟦unsourced: …⟧` and flagged.
+
+**Language:** an English notice gets an English proposal, and Nepali and `mixed` notices get a Nepali one (`mixed` notices are mostly local-body Nepali notices with English terms, §13 Language). English can be forced (`PROPOSAL_FORCE_ENGLISH`, or per request). The Nepali section titles and stub text were written by the model, not a native reader `[VERIFY]` (PROGRESS issue 60).
+
+**Dates:** when the notice wrote a BS date (its deadline, or any BS year 2060–2099 in the text), dates in the proposal show both calendars: `5 Mangsir 2083 BS (21 November 2026 AD), 12:00 NPT`, or in Nepali `५ मंसिर २०८३ (२०२६-११-२१)`. Otherwise they are AD only. Conversion uses the same lookup table (§7). Money uses lakh/crore grouping (`Rs 1,48,75,000`, `रु. १,४८,७५,०००`, §9).
+
+**Not encoded:** the order or wording of PPMO SBD sections `[VERIFY]` against a current SBD. The templates follow the evaluation criteria above, not a form.

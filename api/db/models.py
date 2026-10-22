@@ -40,6 +40,7 @@ from schemas.enums import (
     NoticeLanguage,
     ProcurementMethod,
     ProcurementType,
+    ProposalLanguage,
     ProposalStatus,
     Province,
     RunStatus,
@@ -225,12 +226,16 @@ class ComplianceOverrideRow(Base):
 
 class ProposalRow(Base):
     __tablename__ = "proposals"
-    __table_args__ = (enum_check("status", ProposalStatus, "ck_proposals_status"),)
+    __table_args__ = (
+        enum_check("status", ProposalStatus, "ck_proposals_status"),
+        enum_check("language", ProposalLanguage, "ck_proposals_language"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tender_id: Mapped[int] = mapped_column(ForeignKey("tenders.id", ondelete="CASCADE"), index=True)
     version: Mapped[int] = mapped_column(Integer, server_default="1")
-    sections: Mapped[list[Any]] = mapped_column(JSONB)
+    sections: Mapped[list[Any]] = mapped_column(JSONB)  # ProposalSection dumps, incl. cited_chunk_ids
+    language: Mapped[str | None] = mapped_column(Text)
     review_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(Text, server_default=ProposalStatus.DRAFT.value)
     approved_at: Mapped[datetime | None] = mapped_column(TS)

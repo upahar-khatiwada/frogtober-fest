@@ -261,8 +261,14 @@ export async function overrideCompliance(
   return asTenderDetail(data);
 }
 
-/** POST /tenders/{id}/proposal. 409 while blocked; 501 until the Proposal agent exists. */
-export async function generateProposal(id: number): Promise<Proposal> {
+/**
+ * POST /tenders/{id}/proposal: 202 + a queued run that drafts a new proposal version (409 while blocked).
+ * Poll it with getRun; the proposal stage carries section-by-section `progress`.
+ */
+export async function generateProposal(
+  id: number,
+  forceEnglish?: boolean,
+): Promise<PipelineRunView> {
   if (USE_MOCKS)
     throw new ApiError(
       "Not implemented yet - see PROGRESS.md Next prompt.",
@@ -270,7 +276,11 @@ export async function generateProposal(id: number): Promise<Proposal> {
     );
   const { data, error, response } = await getApiClient().POST(
     "/tenders/{tender_id}/proposal",
-    { params: { path: { tender_id: id } } },
+    {
+      params: { path: { tender_id: id } },
+      body:
+        forceEnglish === undefined ? undefined : { force_english: forceEnglish },
+    },
   );
   if (!data) fail(error, response);
   return data;

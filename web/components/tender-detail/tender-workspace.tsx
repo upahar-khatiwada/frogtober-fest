@@ -139,7 +139,7 @@ export function TenderWorkspace({
     setNotice(null);
     setGenerating(true);
     try {
-      await generateProposal(id);
+      setRun(await generateProposal(id)); // polled like an analyze run
       setNotice({ kind: "ok", key: "td.proposalDone" });
     } catch (e) {
       if (e instanceof ApiError && e.status === 501)

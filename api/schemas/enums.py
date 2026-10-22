@@ -158,6 +158,36 @@ class ProposalStatus(StrEnum):
     APPROVED = "approved"
 
 
+class ProposalLanguage(StrEnum):
+    """Language a proposal is written in: the notice's language (`mixed` -> ne) unless English is forced."""
+
+    EN = "en"
+    NE = "ne"
+
+
+class SectionFlagKind(StrEnum):
+    """Why a proposal section needs a person's attention. JSONB only, so no CHECK constraint."""
+
+    NO_KB_MATERIAL = "no_kb_material"  # retrieval found nothing: no model call, a stub body instead
+    UNGROUNDED = "ungrounded"  # the model cited no chunk that was shown to it
+    UNKNOWN_CITATION = "unknown_citation"  # a cited chunk id was not among the excerpts shown (dropped)
+    UNSOURCED_FIGURE = "unsourced_figure"  # an amount / id / long number the model wrote itself (masked)
+    MISSING_VALUE = "missing_value"  # a placeholder whose company/tender value is not on record
+    UNKNOWN_PLACEHOLDER = "unknown_placeholder"
+    FACT_NOT_VERBATIM = "fact_not_verbatim"  # a {{fact.x}} whose quote is not in its cited chunk
+    GAPS_REPORTED = "gaps_reported"  # the model listed information the excerpts lacked
+
+
+class SectionProgress(StrEnum):
+    """Per-section progress of a running Proposal stage (`StageRun.progress`)."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    OK = "ok"
+    FLAGGED = "flagged"
+    FAILED = "failed"
+
+
 class MatchDecision(StrEnum):
     PURSUE = "pursue"
     SKIP = "skip"

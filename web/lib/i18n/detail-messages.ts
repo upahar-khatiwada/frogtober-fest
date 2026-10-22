@@ -22,7 +22,7 @@ export const DETAIL_EN = {
   "td.proposalNotBuilt":
     "The proposal stage is not built yet (the API returned 501). Any override you confirmed is recorded.",
   "td.proposalFailed": "Could not generate the proposal: {error}",
-  "td.proposalDone": "Proposal generated.",
+  "td.proposalDone": "Proposal drafting started; progress is shown below.",
   "td.notExtracted":
     "This notice has not been extracted yet. Click Analyze to run Scout, Matching and Compliance.",
   "td.statusFailed":
@@ -177,7 +177,7 @@ export const DETAIL_NE: Record<keyof typeof DETAIL_EN, string> = {
   "td.proposalNotBuilt":
     "प्रस्ताव चरण अझै बनेको छैन (API ले ५०१ फर्कायो)। तपाईंले पुष्टि गरेको ओभरराइड अभिलेख भइसकेको छ।",
   "td.proposalFailed": "प्रस्ताव तयार हुन सकेन: {error}",
-  "td.proposalDone": "प्रस्ताव तयार भयो।",
+  "td.proposalDone": "प्रस्ताव तयार गर्न सुरु भयो; प्रगति तल देखिन्छ।",
   "td.notExtracted":
     "यो सूचनाको विवरण अझै निकालिएको छैन। स्काउट, मिलान र अनुपालन चलाउन “विश्लेषण गर्नुहोस्” थिच्नुहोस्।",
   "td.statusFailed":

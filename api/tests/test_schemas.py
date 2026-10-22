@@ -12,6 +12,7 @@ from schemas import (
     MatchDecision,
     MatchResult,
     ProposalSection,
+    ProposalSectionDraft,
     ReviewReport,
     TenderRecord,
 )
@@ -94,10 +95,20 @@ def test_compliance_report_blocks_on_hard_failure():
 
 
 def test_proposal_section_and_review_parse():
-    section = ProposalSection.model_validate_json(
-        '{"title": "Relevant experience", "body": "We built ...", "cited_chunk_ids": [3, 7]}', strict=True
+    draft = ProposalSectionDraft.model_validate_json(
+        '{"body": "We built {{fact.road}} ...", "cited_chunk_ids": [3, 7],'
+        ' "facts": [{"key": "road", "chunk_id": 3, "quote": "Vyas ward 3 road"}]}', strict=True
     )
-    assert section.cited_chunk_ids == [3, 7]
+    assert draft.cited_chunk_ids == [3, 7] and draft.facts[0].chunk_id == 3 and draft.missing == []
+    with pytest.raises(ValidationError):  # the model may not set code-owned fields
+        ProposalSectionDraft.model_validate_json('{"body": "x", "cited_chunk_ids": [], "grounded": true}', strict=True)
+    with pytest.raises(ValidationError):  # fact keys must be placeholder-safe names
+        ProposalSectionDraft.model_validate_json(
+            '{"body": "x", "cited_chunk_ids": [], "facts": [{"key": "a b", "chunk_id": 1, "quote": "q"}]}', strict=True)
+    section = ProposalSection.model_validate_json(
+        '{"key": "relevant_experience", "title": "Relevant experience", "body": "We built ...", "grounded": false}',
+        strict=True)
+    assert section.cited_chunk_ids == [] and section.flags == []  # ungrounded sections are storable (and flagged)
     review = ReviewReport.model_validate_json(
         json.dumps(
             {

@@ -65,6 +65,15 @@ class Settings(BaseSettings):
     # KB chunks retrieved per requirement the rules do not cover, and shown to the model.
     compliance_top_k: int = 4
 
+    # --- Proposal (agents/proposal.py) ---
+    # KB chunks retrieved per section (query = section topic + the tender requirements it answers).
+    proposal_top_k: int = 5
+    # Retrieved chunks below this cosine similarity are not shown; a section left with none is not drafted by the
+    # model but flagged `no_kb_material`. 0 = keep the top-k whatever their similarity.
+    proposal_min_similarity: float = 0.0
+    # Write every proposal in English, whatever the notice language (default: en -> en, ne/mixed -> ne).
+    proposal_force_english: bool = False
+
     # --- Pipeline orchestrator (pipeline/orchestrator.py) ---
     # A queued/running run whose heartbeat is older than this is marked failed ("interrupted"). The heartbeat is
     # bumped per stage and per model call, so this must exceed one call with its retry (2 x LLM_TIMEOUT_S).
