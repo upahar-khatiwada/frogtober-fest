@@ -1,0 +1,41 @@
+{
+ "model": "deterministic",
+ "offline": true,
+ "date": "2026-10-23 05:58 UTC",
+ "errors": {},
+ "seconds": {
+  "matching": 3.5,
+  "compliance": 0.4,
+  "scout": null
+ },
+ "scout": null,
+ "matching": {
+  "core_precision_at_3": 0.333,
+  "relevant_precision_at_3": 1.0,
+  "relevant_pursued": 1.0,
+  "irrelevant_skipped": 0.923,
+  "top3": [
+   "027",
+   "033",
+   "006"
+  ],
+  "false_pursue": [
+   "007",
+   "037"
+  ],
+  "missed_relevant": []
+ },
+ "compliance": {
+  "recall": 1.0,
+  "hard_fail_recall": 0.818,
+  "status_accuracy": 0.667,
+  "false_hard_fails": 0,
+  "blocked_accuracy": 1.0,
+  "labels": 54,
+  "missed_hard_fails": [
+   "002:licence_class",
+   "002:key_equipment"
+  ]
+ },
+ "proposal": null
+}
