@@ -292,13 +292,20 @@ def test_golden_file_shape_and_labels_agree_with_manifest():
     manifest = {n["id"]: n for n in json.loads((SEED_DIR / "manifest.json").read_text(encoding="utf-8"))["notices"]}
     assert len(golden) == 15 and len({e["id"] for e in golden}) == 15
     filled = [e for e in golden if e["status"] == "filled"]
-    assert len(filled) == 5 and all(e["status"] in ("filled", "todo") for e in golden)
+    assert len(filled) == 15
+    assert {e["language"] for e in golden} == {"en", "ne", "mixed"}
     for e in golden:
         assert (SEED_DIR / e["file"]).is_file() and manifest[e["id"]]["file"] == e["file"]
+        assert e["language"] == manifest[e["id"]]["language"] and isinstance(e["relevant"], bool)
     for e in filled:
         m = manifest[e["id"]]["expected"]
         assert e["deadline_bs"] == m["deadline_bs"] and e["estimated_cost_npr"] == m["estimated_cost_npr"]
-        assert datetime.fromisoformat(e["deadline_ad"]).tzinfo is not None
+        if e["deadline_ad"] is not None:
+            assert datetime.fromisoformat(e["deadline_ad"]).tzinfo is not None
+            if m["deadline_ad"]:
+                assert e["deadline_ad"].startswith(m["deadline_ad"])
+        else:
+            assert e["deadline_bs"] is None
         assert all(DocType(t) for t in e["required_doc_types"])
 
 
